@@ -47,6 +47,7 @@ import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEve
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
+import { applyDirenvEnvironment } from "@t3tools/provider-core/server/direnvEnvironment";
 import {
   ProviderAdapterDriverCreateError,
   type ProviderAdapterDriver,
@@ -142,7 +143,7 @@ function makeAcpRegistryRuntime(
     ChildProcessSpawner.ChildProcessSpawner | SecureRandom.SecureRandom | Scope.Scope
   > =>
     Effect.gen(function* () {
-      const { processEnvironment, ...runtimeInput } = input;
+      const { processEnvironment, direnvEnvironment, ...runtimeInput } = input;
       const resolved = yield* catalog
         .resolve(options.settings, input.cwd, options.environment)
         .pipe(
@@ -158,11 +159,17 @@ function makeAcpRegistryRuntime(
         AcpSessionRuntime.layer({
           ...runtimeInput,
           spawn:
-            processEnvironment === undefined
+            processEnvironment === undefined && direnvEnvironment === undefined
               ? resolved.spawn
               : {
                   ...resolved.spawn,
-                  env: { ...resolved.spawn.env, ...processEnvironment },
+                  env: {
+                    ...applyDirenvEnvironment(
+                      resolved.spawn.env ?? options.environment,
+                      direnvEnvironment,
+                    ),
+                    ...processEnvironment,
+                  },
                 },
           ...(options.settings.authMethodId ? { authMethodId: options.settings.authMethodId } : {}),
           customModels: readCustomModelEntries(options.settings.customModels).map(
