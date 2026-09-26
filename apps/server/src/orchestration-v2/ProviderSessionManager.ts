@@ -43,6 +43,7 @@ import {
 import { ProviderWorkspaceMissingError } from "../provider/Errors.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import * as DirenvEnvironment from "../provider/DirenvEnvironment.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
 import * as EventSink from "./EventSink.ts";
@@ -73,6 +74,7 @@ const WORKING_RUN_STATUSES: ReadonlySet<string> = new Set([
 
 export const ProviderSessionReleaseReason = Schema.Literals([
   "idle_timeout",
+  "environment_changed",
   "runtime_error",
   "manual_shutdown",
   "server_shutdown",
@@ -208,6 +210,14 @@ export interface ProviderSessionManagerV2Shape {
     readonly providerSessionId: ProviderSessionId;
     readonly threadId: ThreadId;
   }) => Effect.Effect<ReadonlyArray<ThreadId>>;
+  /**
+   * The project's direnv environment failed to load for the thread's latest
+   * `open`, and the thread has not been told yet. Consumed by the caller that
+   * can place a notice on the thread's timeline.
+   */
+  readonly takeProjectEnvironmentFailure: (
+    threadId: ThreadId,
+  ) => Effect.Effect<DirenvEnvironment.DirenvLoadFailure | undefined>;
 }
 
 export class ProviderSessionManagerV2 extends Context.Service<
@@ -233,6 +243,14 @@ interface LiveSessionEntry {
   readonly idleFiber: Fiber.Fiber<void, never> | null;
   readonly pinnedSinceMs: number | null;
   readonly idleThreadUnloads: ReadonlyMap<ThreadId, IdleThreadUnload>;
+  /** The direnv environment the provider process started with; null when none was loaded. */
+  readonly direnv: SessionDirenvEnvironment | null;
+}
+
+interface SessionDirenvEnvironment {
+  readonly cwd: string;
+  /** Undefined when direnv found nothing to load or the `.envrc` failed. */
+  readonly diff: DirenvEnvironment.DirenvEnvironmentDiff | undefined;
 }
 
 interface IdleThreadUnload {
@@ -384,6 +402,91 @@ export const layerWithOptions = (
           );
         },
       );
+      const direnv = yield* Effect.serviceOption(DirenvEnvironment.DirenvEnvironment);
+      const direnvEnabled = Effect.fn("ProviderSessionManagerV2.direnvEnabled")(
+        function* (threadId: ThreadId) {
+          if (Option.isNone(serverSettings)) return true;
+          const settings = yield* serverSettings.value.getSettings;
+          const thread = yield* projectionStore.getThread(threadId);
+          return resolveProjectSettings(settings, thread.projectId).settings
+            .enableDirenvEnvironment;
+        },
+        Effect.catch((cause) =>
+          Effect.logWarning(
+            "Could not resolve the direnv setting; starting the provider without the project's environment.",
+            { cause },
+          ).pipe(Effect.as(false)),
+        ),
+      );
+      /** The failure each thread was last told about, so restarts do not repeat it. */
+      const reportedDirenvFailures = new Map<ThreadId, string>();
+      const unreportedDirenvFailures = new Map<ThreadId, DirenvEnvironment.DirenvLoadFailure>();
+      const recordDirenvResult = (
+        threadId: ThreadId,
+        result: DirenvEnvironment.DirenvLoadResult,
+      ) => {
+        if (result._tag !== "Failed") {
+          reportedDirenvFailures.delete(threadId);
+          unreportedDirenvFailures.delete(threadId);
+          return;
+        }
+        if (reportedDirenvFailures.get(threadId) === result.message) return;
+        reportedDirenvFailures.set(threadId, result.message);
+        unreportedDirenvFailures.set(threadId, result);
+      };
+      /**
+       * Load the direnv environment for a provider process about to start in
+       * `cwd`. Adapters read it by thread while building their launch
+       * environment. `preloaded` is a diff `checkDirenvEnvironment` just loaded.
+       */
+      const prepareDirenvEnvironment = Effect.fn(
+        "ProviderSessionManagerV2.prepareDirenvEnvironment",
+      )(function* (
+        threadId: ThreadId,
+        cwd: string | null,
+        preloaded: DirenvEnvironment.DirenvEnvironmentDiff | undefined,
+      ) {
+        DirenvEnvironment.setThreadDirenvEnvironment(threadId, preloaded);
+        if (cwd === null) return null;
+        if (preloaded !== undefined) return { cwd, diff: preloaded } as SessionDirenvEnvironment;
+        if (Option.isNone(direnv) || !(yield* direnvEnabled(threadId))) return null;
+        const result = yield* direnv.value.load(cwd);
+        yield* Effect.annotateCurrentSpan({ "provider.direnv.result": result._tag });
+        recordDirenvResult(threadId, result);
+        const diff = result._tag === "Loaded" ? result.diff : undefined;
+        DirenvEnvironment.setThreadDirenvEnvironment(threadId, diff);
+        return { cwd, diff } as SessionDirenvEnvironment;
+      });
+      /**
+       * Re-check a live session's direnv environment before reusing it, as a
+       * shell hook does on each prompt: direnv compares the files it watches
+       * (the `.envrc`, its allow record, `flake.lock`, ...) and only evaluates
+       * again when one changed. `restart` means the process should start over
+       * with `diff`.
+       */
+      const checkDirenvEnvironment = Effect.fn("ProviderSessionManagerV2.checkDirenvEnvironment")(
+        function* (entry: LiveSessionEntry, threadId: ThreadId, cwd: string | null) {
+          const loaded = entry.direnv?.diff;
+          if (Option.isNone(direnv) || cwd === null) return { restart: false } as const;
+          if (!(yield* direnvEnabled(threadId))) return { restart: loaded !== undefined } as const;
+          const previous = entry.direnv?.cwd === cwd ? loaded : undefined;
+          const result = yield* direnv.value.load(cwd, previous);
+          yield* Effect.annotateCurrentSpan({ "provider.direnv.refresh": result._tag });
+          recordDirenvResult(threadId, result);
+          switch (result._tag) {
+            // A running session keeps whatever it started with.
+            case "Failed":
+              return { restart: false } as const;
+            case "None":
+              return { restart: loaded !== undefined } as const;
+            case "Loaded":
+              return result.changed
+                ? ({ restart: true, diff: result.diff } as const)
+                : ({ restart: false } as const);
+          }
+        },
+      );
+
       const layerScope = yield* Effect.scope;
       // Group signals stop providers before restart capture; drop post-signal events so recovery owns that state.
       const shutdownSignal = { received: false };
@@ -2108,6 +2211,9 @@ export const layerWithOptions = (
             ),
           { concurrency: "unbounded", discard: true },
         );
+        DirenvEnvironment.clearAllThreadDirenvEnvironments();
+        reportedDirenvFailures.clear();
+        unreportedDirenvFailures.clear();
       });
       yield* Effect.addFinalizer(() =>
         shutdown.pipe(
@@ -2117,6 +2223,12 @@ export const layerWithOptions = (
 
       return ProviderSessionManagerV2.of({
         shutdown,
+        takeProjectEnvironmentFailure: (threadId) =>
+          Effect.sync(() => {
+            const failure = unreportedDirenvFailures.get(threadId);
+            unreportedDirenvFailures.delete(threadId);
+            return failure;
+          }),
         open: (input) =>
           sessionOpen.withLock(
             input.providerSessionId,
@@ -2136,6 +2248,7 @@ export const layerWithOptions = (
               }
               const key = sessionKey(input.providerSessionId);
               const existing = (yield* Ref.get(sessions)).get(key);
+              let preloadedDirenv: DirenvEnvironment.DirenvEnvironmentDiff | undefined;
               if (existing !== undefined) {
                 const attached = existing.attachedThreadIds.has(input.threadId);
                 if (!attached && !existing.supportsMultipleProviderThreads) {
@@ -2145,14 +2258,35 @@ export const layerWithOptions = (
                     cause: `Provider ${existing.runtime.driver} does not support attaching multiple app threads to one session.`,
                   });
                 }
-                if (!attached) yield* agentScope.clear(input.threadId);
-                yield* ensureThreadAttached({
+                // Restarting the process would cut off work in flight or other
+                // threads sharing it; those pick the change up once it idles.
+                const ownedIdle =
+                  existing.busyTurns.size === 0 &&
+                  existing.attachedThreadIds.size === 1 &&
+                  existing.attachedThreadIds.has(input.threadId);
+                const direnvRefresh = ownedIdle
+                  ? yield* checkDirenvEnvironment(existing, input.threadId, cwd)
+                  : ({ restart: false } as const);
+                if (!direnvRefresh.restart) {
+                  // Joining a shared session is a new session for this thread.
+                  if (!attached) yield* agentScope.clear(input.threadId);
+                  yield* ensureThreadAttached({
+                    providerSessionId: input.providerSessionId,
+                    threadId: input.threadId,
+                    providerInstanceId: existing.runtime.instanceId,
+                  });
+                  yield* touchActivity(input.providerSessionId);
+                  return existing.exposedRuntime;
+                }
+                yield* Effect.logInfo("orchestration-v2.provider-session.environment-changed", {
                   providerSessionId: input.providerSessionId,
                   threadId: input.threadId,
-                  providerInstanceId: existing.runtime.instanceId,
                 });
-                yield* touchActivity(input.providerSessionId);
-                return existing.exposedRuntime;
+                yield* releaseEntry({
+                  providerSessionId: input.providerSessionId,
+                  reason: "environment_changed",
+                });
+                preloadedDirenv = "diff" in direnvRefresh ? direnvRefresh.diff : undefined;
               }
 
               const adapter = yield* registry.get(input.modelSelection.instanceId).pipe(
@@ -2164,6 +2298,11 @@ export const layerWithOptions = (
                       cause,
                     }),
                 ),
+              );
+              const sessionDirenv = yield* prepareDirenvEnvironment(
+                input.threadId,
+                cwd,
+                preloadedDirenv,
               );
               const prepared = yield* prepareMcpSession(
                 input.threadId,
@@ -2253,6 +2392,7 @@ export const layerWithOptions = (
                 idleFiber: null,
                 pinnedSinceMs: null,
                 idleThreadUnloads: new Map(),
+                direnv: sessionDirenv,
               };
               yield* Ref.update(sessions, (current) => {
                 const updated = new Map(current);
@@ -2491,6 +2631,9 @@ export const layerWithOptions = (
             // Plain detaches preserve credentials held by live shared providers across workspace handoffs.
             if (input.revokeMcpCredential === true) {
               yield* clearMcpSession(input.threadId);
+              DirenvEnvironment.setThreadDirenvEnvironment(input.threadId, undefined);
+              reportedDirenvFailures.delete(input.threadId);
+              unreportedDirenvFailures.delete(input.threadId);
             }
             if (Option.isNone(detached)) {
               return;

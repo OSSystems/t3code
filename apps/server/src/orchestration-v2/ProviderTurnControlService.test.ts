@@ -286,6 +286,7 @@ it.effect(
           detach: () => Effect.void,
           otherWorkingThreads: () => Effect.succeed([]),
           releaseUnlessBusy: () => Effect.succeed(true),
+          takeProjectEnvironmentFailure: () => Effect.undefined,
         }),
       );
       const layerControl = ProviderTurnControlService.layer.pipe(

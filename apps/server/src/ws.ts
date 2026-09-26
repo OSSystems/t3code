@@ -214,6 +214,7 @@ import * as ProjectService from "./project/ProjectService.ts";
 import { threadWorkspaceRoot } from "./project/threadWorkspaceRoot.ts";
 import * as ManagedProjectFolders from "./project/ManagedProjectFolders.ts";
 import * as ScratchThreadPromotion from "./project/ScratchThreadPromotion.ts";
+import * as DirenvEnvironment from "./provider/DirenvEnvironment.ts";
 import { projectMutationOperation } from "./project/ProjectMutation.ts";
 import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
@@ -1304,6 +1305,38 @@ export const layerWsRpc = (
       const repositoryIdentityResolver =
         yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
       const projectEnrichment = yield* ProjectEnrichmentService.ProjectEnrichmentService;
+      const direnvEnvironment = yield* Effect.serviceOption(DirenvEnvironment.DirenvEnvironment);
+      const allowThreadDirenv = Effect.fn("ws.allowThreadDirenv")(function* (threadId: ThreadId) {
+        const thread = yield* threadManagement.getThreadRecords(threadId, []).pipe(
+          Effect.map((records) => records.thread),
+          Effect.orElseSucceed(() => undefined),
+        );
+        const project =
+          thread === undefined || thread.worktreePath !== null
+            ? undefined
+            : Option.getOrUndefined(
+                yield* projectService
+                  .getById(thread.projectId)
+                  .pipe(Effect.orElseSucceed(() => Option.none())),
+              );
+        // The same directory RuntimePolicyV2 starts the thread's provider in.
+        const cwd = thread?.worktreePath ?? project?.workspaceRoot;
+        if (cwd === undefined) {
+          return { allowed: false, error: "The thread has no workspace." };
+        }
+        if (Option.isNone(direnvEnvironment)) {
+          return { allowed: false, error: "direnv support is unavailable on this server." };
+        }
+        const result = yield* direnvEnvironment.value.allow(cwd);
+        switch (result._tag) {
+          case "Allowed":
+            return { allowed: true };
+          case "NotFound":
+            return { allowed: false, error: "No .envrc governs the thread's workspace." };
+          case "Failed":
+            return { allowed: false, error: result.message };
+        }
+      });
       const agentSessionScanner = yield* AgentSessionScanner.AgentSessionScanner;
       const agentSessionImporter = yield* AgentSessionImporter.AgentSessionImporter;
       const checkpointDiffQuery = yield* CheckpointDiffQuery.CheckpointDiffQuery;
@@ -2935,6 +2968,7 @@ export const layerWsRpc = (
           worktreeSetupTracker
             .cancel(input.threadId)
             .pipe(Effect.map((cancelled) => ({ cancelled }))),
+        [WS_METHODS.projectEnvironmentAllowDirenv]: (input) => allowThreadDirenv(input.threadId),
         [WS_METHODS.vcsRefreshStatus]: (input) =>
           vcsStatusBroadcaster.refreshStatus(input.cwd, { localOnly: input.localOnly ?? false }),
         [WS_METHODS.vcsPull]: (input) =>
