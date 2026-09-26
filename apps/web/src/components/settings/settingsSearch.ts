@@ -791,6 +791,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["caffeinate sleep prevent stay awake power laptop lid inhibit"],
   },
   {
+    id: "direnv-environment",
+    title: "Load direnv environment",
+    to: "/settings/general",
+    scope: "project-defaults",
+    searchTerms: ["envrc nix flake devenv mise dev shell path tools environment variables agents"],
+  },
+  {
     id: "background-activity",
     title: "Background activity",
     to: "/settings/maintenance",

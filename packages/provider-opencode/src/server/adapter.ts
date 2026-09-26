@@ -58,6 +58,7 @@ import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import { mcpToolPresentation } from "@t3tools/provider-core/server/mcpToolPresentation";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
+import * as DirenvEnvironment from "@t3tools/provider-core/server/direnvEnvironment";
 import {
   structuralProtocolMethod,
   summarizeNativeProtocolPayload,
@@ -1052,7 +1053,10 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
           ...(settingsSecretLiteral(options.settings.serverPassword)
             ? { serverPassword: settingsSecretLiteral(options.settings.serverPassword) }
             : {}),
-          environment: options.environment,
+          environment: DirenvEnvironment.withThreadDirenvEnvironment(
+            options.environment,
+            input.threadId,
+          ),
         });
         const client = runtime.createOpenCodeSdkClient({
           baseUrl: connection.url,

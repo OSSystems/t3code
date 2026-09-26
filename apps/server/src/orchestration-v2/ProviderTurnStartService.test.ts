@@ -1300,6 +1300,7 @@ function makeLocalCommandHarness(input: {
                     interruptTurn,
                   } as unknown as ProviderAdapter.ProviderAdapterV2SessionRuntime),
             ),
+          takeProjectEnvironmentFailure: () => Effect.undefined,
         }),
         Layer.mock(ProviderAuthService.ProviderAuthService)({ tryHandlePromptCommand }),
         Layer.mock(RunExecutionService.RunExecutionServiceV2)({

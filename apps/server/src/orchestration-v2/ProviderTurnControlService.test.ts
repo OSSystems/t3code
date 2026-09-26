@@ -302,6 +302,7 @@ it.effect(
           otherWorkingThreads: () => Effect.succeed([]),
           releaseUnlessBusy: () => Effect.succeed(true),
           subscribePromptSuggestion: () => Stream.empty,
+          takeProjectEnvironmentFailure: () => Effect.undefined,
         }),
       );
       const layerControl = ProviderTurnControlService.layer.pipe(
