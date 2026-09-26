@@ -66,6 +66,7 @@ import { makeAcpMcpOverAcpBridge, type AcpMcpOverAcpBridge } from "./mcpOverAcpB
 import { mcpToolPresentation } from "@t3tools/provider-core/server/mcpToolPresentation";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
+import * as DirenvEnvironment from "@t3tools/provider-core/server/direnvEnvironment";
 import {
   applyAcpAgentTerminalUpdate,
   acpContentBlockDisplayText,
@@ -148,6 +149,8 @@ export interface AcpAdapterV2RuntimeInput {
   readonly mcpServers: ReadonlyArray<EffectAcpSchema.McpServer>;
   readonly acpMcpServers?: ReadonlyArray<EffectAcpSchema.McpServer>;
   readonly processEnvironment?: NodeJS.ProcessEnv;
+  /** The project's direnv environment, for flavors to apply to the agent's launch environment. */
+  readonly direnvEnvironment?: DirenvEnvironment.DirenvEnvironmentDiff;
   readonly resumeSessionId?: string;
   readonly interruptPromptOnCancel?: boolean;
   readonly clientCapabilities: EffectAcpSchema.InitializeRequest["clientCapabilities"];
@@ -1468,7 +1471,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             ? undefined
             : yield* makeAcpClientTerminals({
                 defaultCwd: input.runtimePolicy.cwd ?? process.cwd(),
-                environment: options.clientTerminals.environment,
+                environment: DirenvEnvironment.withThreadDirenvEnvironment(
+                  options.clientTerminals.environment ?? process.env,
+                  input.threadId,
+                ),
                 shellCommands: options.clientTerminals.shellCommands,
                 environmentForSession: (sessionId) => {
                   const remembered = terminalEnvironmentBySessionId.get(sessionId);
@@ -2015,6 +2021,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           onTermination: AcpAdapterV2RuntimeInput["onTermination"] = () =>
             handleRuntimeTerminationAtGeneration(runtimeGeneration),
         ): AcpAdapterV2RuntimeInput => {
+          // The launch environment belongs to the session, which loaded it for
+          // the thread that opened it.
+          const direnvEnvironment = DirenvEnvironment.readThreadDirenvEnvironment(input.threadId);
           return {
             cwd: input.runtimePolicy.cwd ?? process.cwd(),
             runtimePolicy: input.runtimePolicy,
@@ -2023,6 +2032,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             ...(mcpContext.processEnvironment === undefined
               ? {}
               : { processEnvironment: mcpContext.processEnvironment }),
+            ...(direnvEnvironment === undefined ? {} : { direnvEnvironment }),
             ...(resumeSessionId === undefined ? {} : { resumeSessionId }),
             interruptPromptOnCancel: flavor.interruptPromptOnCancel ?? false,
             clientCapabilities: {

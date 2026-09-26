@@ -35,6 +35,7 @@ import {
 import {
   AccessibilityInfo,
   Animated as NativeAnimated,
+  Alert,
   AppState,
   type ColorValue,
   Easing,
@@ -870,6 +871,54 @@ function ReplCodeText({
   );
 }
 
+/** Allows the thread's blocked `.envrc`; the next message loads it. */
+// The work log remounts rows, so the outcome outlives the button.
+const allowedDirenvWarnings = new Set<string>();
+
+function AllowDirenvButton(props: {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+  readonly warningId: string;
+}) {
+  const allowDirenv = useAtomCommand(threadEnvironment.allowDirenv, "allow direnv");
+  const [state, setState] = useState<"idle" | "pending" | "allowed">(() =>
+    allowedDirenvWarnings.has(props.warningId) ? "allowed" : "idle",
+  );
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityHint="Loads the project's direnv environment with your next message."
+      disabled={state !== "idle"}
+      hitSlop={6}
+      onPress={async () => {
+        setState("pending");
+        const result = await allowDirenv({
+          environmentId: props.environmentId,
+          input: { threadId: props.threadId },
+        });
+        if (result._tag === "Success" && result.value.allowed) {
+          allowedDirenvWarnings.add(props.warningId);
+          setState("allowed");
+          return;
+        }
+        setState("idle");
+        if (result._tag === "Success") {
+          Alert.alert("Could not allow the .envrc", result.value.error);
+        }
+      }}
+      className="min-h-8 justify-center px-2"
+    >
+      <Text className="font-t3-medium text-xs text-foreground">
+        {state === "allowed"
+          ? "Allowed · applies to your next message"
+          : state === "pending"
+            ? "Allowing…"
+            : "Allow .envrc"}
+      </Text>
+    </Pressable>
+  );
+}
+
 const ThreadWorkLogRow = function ThreadWorkLogRow(
   props: Omit<
     ThreadWorkLogProps,
@@ -1136,6 +1185,14 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
         )}
 
         <View className="shrink-0 flex-row items-center gap-px">
+          {row.projectedItem.item.type === "system_notice" &&
+          row.projectedItem.item.action?.type === "direnv.allow" ? (
+            <AllowDirenvButton
+              environmentId={props.environmentId}
+              threadId={row.projectedItem.item.threadId}
+              warningId={row.projectedItem.item.id}
+            />
+          ) : null}
           {props.copied ? (
             <Text className="pr-1 font-t3-medium text-3xs text-adaptive-emerald-600-400">
               Copied

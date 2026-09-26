@@ -978,6 +978,7 @@ export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "defaultProjectScripts",
   "enableAgentBrowserAccess",
   "enableAgentDeviceAccess",
+  "enableDirenvEnvironment",
   "textGenerationModelSelection",
   "sourceControlWriterModelSelection",
   "reviewGuideModelSelection",
@@ -1021,6 +1022,7 @@ export const ProjectSettingsOverrides = Schema.Struct({
   defaultProjectScripts: Schema.optionalKey(Schema.Array(ProjectScript)),
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
   enableAgentDeviceAccess: Schema.optionalKey(Schema.Boolean),
+  enableDirenvEnvironment: Schema.optionalKey(Schema.Boolean),
   textGenerationModelSelection: Schema.optionalKey(ModelSelection),
   sourceControlWriterModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   reviewGuideModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
@@ -1186,6 +1188,12 @@ export const ServerSettings = Schema.Struct({
   projectSettingsFolded: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
 
   enableAgentDeviceAccess: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  /**
+   * Whether provider sessions load the project's direnv environment (`.envrc`),
+   * as a shell with the direnv hook would. Only `.envrc` files the user has
+   * already approved with `direnv allow` are loaded.
+   */
+  enableDirenvEnvironment: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   /**
    * Kept separate from agent access so enabling the user's Device panel does
    * not also grant providers control of simulators and emulators.
@@ -1559,6 +1567,7 @@ export const ServerSettingsPatch = Schema.Struct({
     ),
   ),
   enableAgentDeviceAccess: Schema.optionalKey(Schema.Boolean),
+  enableDirenvEnvironment: Schema.optionalKey(Schema.Boolean),
   enableDeviceSupport: Schema.optionalKey(Schema.Boolean),
   deviceOnboardingCompleted: Schema.optionalKey(Schema.Boolean),
   deviceHosts: Schema.optionalKey(SshDeviceHostConfigs),
