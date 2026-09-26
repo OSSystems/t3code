@@ -1778,6 +1778,12 @@ export const OrchestrationV2ModelSwitch = Schema.Struct({
 export type OrchestrationV2ModelSwitch = typeof OrchestrationV2ModelSwitch.Type;
 
 const AssistantMessagePhase = Schema.Literals(["commentary", "partial_answer", "final_answer"]);
+/** Something the user can do about a notice, rendered as a button on its row. */
+export const OrchestrationV2SystemNoticeAction = Schema.Struct({
+  /** `direnv allow` the thread's `.envrc` (`projectEnvironment.allowDirenv`). */
+  type: Schema.Literal("direnv.allow"),
+});
+export type OrchestrationV2SystemNoticeAction = typeof OrchestrationV2SystemNoticeAction.Type;
 
 const OrchestrationV2TurnItemBaseFields = {
   /** Wire-only cursor for collapsed work; persisted items keep their complete history. */
@@ -2045,6 +2051,8 @@ export const OrchestrationV2TurnItem = Schema.Union([
     message: Schema.String,
     level: Schema.optional(OrchestrationV2SystemNoticeLevel),
     mcpSignIn: Schema.optional(OrchestrationV2McpSignIn),
+    detail: Schema.optional(Schema.String),
+    action: Schema.optional(OrchestrationV2SystemNoticeAction),
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemBaseFields,
@@ -2942,6 +2950,8 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
     message: Schema.String,
     level: Schema.optional(OrchestrationV2SystemNoticeLevel),
     mcpSignIn: Schema.optional(OrchestrationV2McpSignIn),
+    detail: Schema.optional(Schema.String),
+    action: Schema.optional(OrchestrationV2SystemNoticeAction),
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemJsonBaseFields,

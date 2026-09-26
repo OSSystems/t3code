@@ -9,6 +9,7 @@ import {
 import {
   ORCHESTRATION_V2_WORKSPACE_PREPARATION_FAILURE_CODE,
   type EnvironmentId,
+  type ScopedThreadRef,
   ThreadId,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
@@ -27,7 +28,15 @@ import {
 } from "@t3tools/client-runtime/work-log/item-detail";
 import { claudeSkillInvocation } from "@t3tools/shared/toolActivity";
 import { msg, T, useGT, useMessages, Var } from "gt-react";
-import { memo, use, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import {
+  memo,
+  use,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent,
+} from "react";
 import {
   workEntryDisplayIndicatesToolFailure,
   workEntrySignalsSevereFailure,
@@ -50,6 +59,9 @@ import { Button, InlineButton } from "../ui/button";
 import { useAssetUrls } from "../../assets/assetUrls";
 import { observeResize } from "../../lib/observeResize";
 import { useThreadShell } from "../../state/entities";
+import { threadEnvironment } from "../../state/threads";
+import { useAtomCommand } from "../../state/use-atom-command";
+import { toastManager } from "../ui/toast";
 import {
   threadReadTargetId,
   threadReadTargetTitle,
@@ -233,6 +245,61 @@ type WorkEntryRowProps = {
   onToggleEntry?: ((collapsed: boolean) => void) | undefined;
   onContentReady?: (() => void) | undefined;
 };
+
+/** Allows the thread's blocked `.envrc`; the next message loads it. */
+// The virtualized timeline remounts rows, so the outcome outlives the button.
+const allowedDirenvWarnings = new Set<string>();
+
+function AllowDirenvButton({
+  threadRef,
+  warningId,
+}: {
+  readonly threadRef: ScopedThreadRef;
+  readonly warningId: string;
+}) {
+  const gt = useGT();
+  const allowDirenv = useAtomCommand(threadEnvironment.allowDirenv);
+  const [state, setState] = useState<"idle" | "pending" | "allowed">(() =>
+    allowedDirenvWarnings.has(warningId) ? "allowed" : "idle",
+  );
+  const onClick = async (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    setState("pending");
+    const result = await allowDirenv({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId },
+    });
+    if (result._tag === "Success" && result.value.allowed) {
+      allowedDirenvWarnings.add(warningId);
+      setState("allowed");
+      return;
+    }
+    setState("idle");
+    if (result._tag === "Success") {
+      toastManager.add({
+        type: "error",
+        title: gt("Could not allow the .envrc"),
+        description: result.value.error,
+      });
+    }
+  };
+  return (
+    <Button
+      disabled={state !== "idle"}
+      onClick={onClick}
+      onKeyDown={(event) => event.stopPropagation()}
+      size="xs"
+      type="button"
+      variant="ghost-muted"
+    >
+      {state === "allowed"
+        ? gt("Allowed · applies to your next message")
+        : state === "pending"
+          ? gt("Allowing…")
+          : gt("Allow .envrc")}
+    </Button>
+  );
+}
 
 export const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: WorkEntryRowProps) {
   const ctx = use(TimelineRowCtx);
@@ -697,6 +764,9 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
                 )}
               />
             </span>
+          ) : null}
+          {workEntry.warningAction?.type === "direnv.allow" && threadRef ? (
+            <AllowDirenvButton threadRef={threadRef} warningId={workEntry.id} />
           ) : null}
         </>
       }

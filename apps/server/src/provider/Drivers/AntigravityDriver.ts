@@ -1,4 +1,5 @@
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import { applyDirenvEnvironment } from "../DirenvEnvironment.ts";
 import {
   AntigravitySettings,
   ProviderDriverKind,
@@ -321,11 +322,15 @@ export const AntigravityDriver: ProviderDriver<
       // `buildAntigravityAcpSpawnInput` sets `extendEnv: false`, so thread variables only reach the
       // agent's shell through `baseEnv`.
       const { processEnvironment: threadEnvironment, ...runtimeInput } = input;
+      const direnvEnvironment = applyDirenvEnvironment(
+        processEnvironment,
+        runtimeInput.direnvEnvironment,
+      );
       const { executable, spawn } = yield* prepareSpawn(
         runtimeInput.cwd,
         threadEnvironment === undefined
-          ? processEnvironment
-          : { ...processEnvironment, ...threadEnvironment },
+          ? direnvEnvironment
+          : { ...direnvEnvironment, ...threadEnvironment },
       );
       const runtime = yield* makeAntigravityAcpRuntime({
         ...runtimeInput,
