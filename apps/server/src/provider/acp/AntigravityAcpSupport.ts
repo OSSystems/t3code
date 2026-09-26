@@ -22,6 +22,7 @@ import {
   makeAntigravityStderrHandler,
   makeAntigravityStdoutTransform,
 } from "../antigravityAuthSupport.ts";
+import type { DirenvEnvironmentDiff } from "../DirenvEnvironment.ts";
 import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import packageJson from "../../../package.json" with { type: "json" };
 import { normalizeAntigravitySessionUpdate } from "./AntigravityProtocol.ts";
@@ -39,6 +40,8 @@ export interface AntigravityAcpRuntimeInput extends Omit<
   | "transformSessionUpdate"
   | "transformStdout"
 > {
+  /** The project's direnv environment loaded for this provider session. */
+  readonly direnvEnvironment?: DirenvEnvironmentDiff;
   readonly childProcessSpawner: ChildProcessSpawner.ChildProcessSpawner["Service"];
   readonly onAuthorizationUrl?: (url: string) => Effect.Effect<void, EffectAcpErrors.AcpError>;
   /** Serve `fs/read_text_file` for runtimes whose native reader is not qualified. */
