@@ -3419,7 +3419,6 @@ export function ArchivedThreadsPanel() {
     snapshots: archivedSnapshots,
     error: archiveError,
     isLoading: isLoadingArchive,
-    refresh: refreshArchivedThreads,
   } = useArchivedThreadSnapshots(scope.environmentIds);
 
   const archivedGroups = useMemo(() => {
@@ -3484,9 +3483,7 @@ export function ArchivedThreadsPanel() {
 
       if (clicked === "unarchive") {
         const result = await unarchiveThread(threadRef);
-        if (result._tag === "Success") {
-          refreshArchivedThreads();
-        } else if (!isAtomCommandInterrupted(result)) {
+        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
           const error = squashAtomCommandFailure(result);
           toastManager.add(
             stackedThreadToast({
@@ -3501,9 +3498,7 @@ export function ArchivedThreadsPanel() {
 
       if (clicked === "delete") {
         const result = await confirmAndDeleteThread(threadRef);
-        if (result._tag === "Success") {
-          refreshArchivedThreads();
-        } else if (!isAtomCommandInterrupted(result)) {
+        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
           const error = squashAtomCommandFailure(result);
           toastManager.add(
             stackedThreadToast({
@@ -3515,7 +3510,7 @@ export function ArchivedThreadsPanel() {
         }
       }
     },
-    [confirmAndDeleteThread, refreshArchivedThreads, unarchiveThread],
+    [confirmAndDeleteThread, unarchiveThread],
   );
 
   return (
@@ -3602,11 +3597,7 @@ export function ArchivedThreadsPanel() {
                         const result = await unarchiveThread(
                           scopeThreadRef(thread.environmentId, thread.id),
                         );
-                        if (result._tag === "Success") {
-                          refreshArchivedThreads();
-                          return;
-                        }
-                        if (!isAtomCommandInterrupted(result)) {
+                        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
                           const error = squashAtomCommandFailure(result);
                           toastManager.add(
                             stackedThreadToast({
