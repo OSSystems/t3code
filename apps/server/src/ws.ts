@@ -62,7 +62,6 @@ import {
   OrchestrationV2GetThreadProjectionError,
   OrchestrationV2ThreadLaunchError,
   type OrchestrationProjectShell,
-  type OrchestrationV2ArchivedShellStreamItem,
   type OrchestrationV2ShellSnapshot,
   type ProjectEntriesFailure,
   type ProjectFileFailure,
@@ -126,7 +125,7 @@ import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "./secrets/SecretRequests.ts";
 import {
-  archivedShellItemsNeedSnapshot,
+  archivedShellStream,
   archivedShellStreamItemFromThreadShell,
   buildActiveShellSnapshot,
   coalesceShellApplicationEvents,
@@ -1780,16 +1779,14 @@ const layerWsRpc = (
         "ws.orchestrationV2.subscribeArchivedShell",
       )(function* () {
         const snapshot = yield* getOrchestrationV2ArchivedShellSnapshot;
-        const knownProjectIds = yield* Ref.make(
-          new Set(snapshot.projects.map((project) => project.id)),
-        );
-        const live = threadManagement
-          .streamStoredEventsFrom({ afterSequence: snapshot.snapshotSequence })
-          .pipe(
-            Stream.groupedWithin(512, Duration.millis(50)),
-            Stream.mapEffect((events) =>
-              Effect.gen(function* () {
-                const items = (yield* Effect.forEach(
+        return archivedShellStream({
+          snapshot,
+          loadSnapshot: getOrchestrationV2ArchivedShellSnapshot,
+          batchesFrom: (afterSequence) =>
+            threadManagement.streamStoredEventsFrom({ afterSequence }).pipe(
+              Stream.groupedWithin(512, Duration.millis(50)),
+              Stream.mapEffect((events) =>
+                Effect.forEach(
                   coalesceStoredThreadEvents(Array.from(events)),
                   (stored) =>
                     threadManagement
@@ -1800,31 +1797,18 @@ const layerWsRpc = (
                         ),
                       ),
                   { concurrency: 8 },
-                )).filter((item) => item !== null);
-                if (!archivedShellItemsNeedSnapshot(items, yield* Ref.get(knownProjectIds))) {
-                  return items;
-                }
-                const fresh = yield* getOrchestrationV2ArchivedShellSnapshot;
-                yield* Ref.set(
-                  knownProjectIds,
-                  new Set(fresh.projects.map((project) => project.id)),
-                );
-                return [{ kind: "snapshot" as const, snapshot: fresh }];
+                ).pipe(Effect.map((items) => items.filter((item) => item !== null))),
+              ),
+            ),
+        }).pipe(
+          Stream.mapError(
+            (cause) =>
+              new OrchestrationV2GetShellSnapshotError({
+                message: "Failed while streaming archived threads",
+                cause,
               }),
-            ),
-            Stream.flatMap((items) =>
-              Stream.fromIterable<OrchestrationV2ArchivedShellStreamItem>(items),
-            ),
-            (stream) => bufferLiveStream(stream),
-            Stream.mapError(
-              (cause) =>
-                new OrchestrationV2GetShellSnapshotError({
-                  message: "Failed while streaming archived threads",
-                  cause,
-                }),
-            ),
-          );
-        return Stream.concat(rpcInitialItems([{ kind: "snapshot" as const, snapshot }]), live);
+          ),
+        );
       });
 
       const mutateProject = Effect.fn("ws.projects.mutate")(function* (mutation: ProjectMutation) {
