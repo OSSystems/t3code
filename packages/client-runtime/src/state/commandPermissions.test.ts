@@ -175,6 +175,21 @@ describe("command permissions", () => {
     }),
   );
 
+  it.effect("requires the destination operate grant to allow a project's .envrc", () =>
+    Effect.gen(function* () {
+      const registry = yield* setup;
+      const allow = createCommandPermissions(runtime, WS_METHODS.projectEnvironmentAllowDirenv);
+      registry.set(sessions(env), AsyncResult.success(grant(false)));
+      expect(registry.get(allow.permissionAtom(env))).toBe(false);
+      expect((yield* allow.authorize(registry, env).pipe(Effect.flip))._tag).toBe(
+        "EnvironmentAuthorizationError",
+      );
+      registry.set(sessions(env), AsyncResult.success(grant(true)));
+      expect(registry.get(allow.permissionAtom(env))).toBe(true);
+      yield* allow.authorize(registry, env);
+    }),
+  );
+
   it.effect.each([WS_METHODS.serverCheckOtlpEndpoint, WS_METHODS.serverCheckSecretSource])(
     "requires the destination settings grant for %s",
     (method) =>
