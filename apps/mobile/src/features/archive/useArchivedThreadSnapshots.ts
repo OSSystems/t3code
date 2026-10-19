@@ -7,6 +7,7 @@ import {
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useCallback, useMemo } from "react";
 
+import { environmentCatalog } from "../../connection/catalog";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { orchestrationEnvironment } from "../../state/orchestration";
 
@@ -16,6 +17,7 @@ function archivedSnapshotAtom(environmentId: EnvironmentId) {
 
 const archivedSnapshotsAtom = createArchivedThreadSnapshotsAtomFamily({
   getSnapshotAtom: archivedSnapshotAtom,
+  getConnectionStateAtom: environmentCatalog.stateAtom,
   labelPrefix: "mobile:archived-thread-snapshots",
 });
 

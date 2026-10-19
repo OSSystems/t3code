@@ -9,6 +9,8 @@ import * as Option from "effect/Option";
 import * as Order from "effect/Order";
 import { AsyncResult, Atom } from "effect/reactivity";
 
+import type { SupervisorConnectionState } from "../connection/model.ts";
+
 export interface ArchivedSnapshotEntry {
   readonly environmentId: EnvironmentId;
   readonly snapshot: OrchestrationV2ArchivedShellSnapshot;
@@ -64,6 +66,9 @@ export function createArchivedThreadSnapshotsAtomFamily<E>(options: {
   readonly getSnapshotAtom: (
     environmentId: EnvironmentId,
   ) => Atom.Atom<AsyncResult.AsyncResult<OrchestrationV2ArchivedShellSnapshot, E>>;
+  readonly getConnectionStateAtom: (
+    environmentId: EnvironmentId,
+  ) => Atom.Atom<AsyncResult.AsyncResult<SupervisorConnectionState, unknown>>;
   readonly labelPrefix: string;
 }) {
   return Atom.family((environmentKey: string) =>
@@ -74,15 +79,22 @@ export function createArchivedThreadSnapshotsAtomFamily<E>(options: {
 
       for (const environmentId of parseArchivedThreadsEnvironmentKey(environmentKey)) {
         const result = get(options.getSnapshotAtom(environmentId));
+        const connection = get(options.getConnectionStateAtom(environmentId));
+        const state = Option.getOrNull(AsyncResult.value(connection));
+        const unavailable =
+          connection._tag === "Failure" ||
+          state?.phase === "available" ||
+          state?.phase === "offline" ||
+          state?.phase === "blocked";
         // Live snapshots stay `waiting` while subscribed; only the first load counts.
-        isLoading ||= result._tag === "Initial";
+        isLoading ||= result._tag === "Initial" && !unavailable;
 
         const snapshot = Option.getOrNull(AsyncResult.value(result));
         if (snapshot !== null) {
           snapshots.push({ environmentId, snapshot });
         }
 
-        if (error === null && result._tag === "Failure") {
+        if (error === null && (result._tag === "Failure" || unavailable)) {
           error = "Failed to load archived threads.";
         }
       }

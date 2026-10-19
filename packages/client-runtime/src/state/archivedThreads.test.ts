@@ -28,6 +28,7 @@ import * as EnvironmentRegistry from "../connection/registry.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import type { RpcSession } from "../rpc/session.ts";
+import { createEnvironmentCatalogAtoms } from "./connections.ts";
 import { createOrchestrationEnvironmentAtoms } from "./orchestration.ts";
 import { v2Now, v2Project, v2ThreadShell } from "./orchestrationV2TestFixtures.ts";
 
@@ -54,6 +55,7 @@ it("does not expose an archived snapshot failure message", () => {
           Cause.fail(new Error("credential=secret-value")),
         ),
       ),
+    getConnectionStateAtom: () => Atom.make(AsyncResult.initial<SupervisorConnectionState>()),
     labelPrefix: "test:archived-thread-snapshots",
   });
   const registry = AtomRegistry.make();
@@ -141,21 +143,33 @@ it.effect("keeps environment archives live and replaces stale data on reconnect"
           environmentId === envA ? a.supervisor : b.supervisor,
         ),
     } as EnvironmentRegistry.EnvironmentRegistry["Service"]);
-    const atoms = createOrchestrationEnvironmentAtoms(
-      Atom.runtime(
-        Layer.merge(
-          Layer.succeed(EnvironmentRegistry.EnvironmentRegistry, environments),
-          FetchHttpClient.layer,
-        ),
+    const runtime = Atom.runtime(
+      Layer.merge(
+        Layer.succeed(EnvironmentRegistry.EnvironmentRegistry, environments),
+        FetchHttpClient.layer,
       ),
     );
+    const atoms = createOrchestrationEnvironmentAtoms(runtime);
+    const catalog = createEnvironmentCatalogAtoms(runtime);
     const snapshots = createArchivedThreadSnapshotsAtomFamily({
       getSnapshotAtom: (environmentId) => atoms.archivedShell({ environmentId, input: {} }),
+      getConnectionStateAtom: catalog.stateAtom,
       labelPrefix: "test:archived-thread-snapshots",
     })(makeArchivedThreadsEnvironmentKey([envA, envB]));
     const registry = yield* Effect.acquireRelease(Effect.sync(AtomRegistry.make), (registry) =>
       Effect.sync(() => registry.dispose()),
     );
+    for (const [environmentId, phase] of [
+      [envA, "connected"],
+      [envB, "offline"],
+    ] as const) {
+      yield* AtomRegistry.toStream(registry, catalog.stateAtom(environmentId)).pipe(
+        Stream.filter((result) =>
+          Option.exists(AsyncResult.value(result), (state) => state.phase === phase),
+        ),
+        Stream.runHead,
+      );
+    }
     registry.mount(snapshots);
     expect(registry.get(snapshots).isLoading).toBe(true);
 

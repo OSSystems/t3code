@@ -6,6 +6,7 @@ import {
 } from "@t3tools/client-runtime/state/threads";
 import type { EnvironmentId } from "@t3tools/contracts";
 
+import { environmentCatalog } from "../connection/catalog";
 import { orchestrationEnvironment } from "../state/orchestration";
 
 function archivedSnapshotAtom(environmentId: EnvironmentId) {
@@ -17,6 +18,7 @@ function archivedSnapshotAtom(environmentId: EnvironmentId) {
 
 const archivedSnapshotsAtom = createArchivedThreadSnapshotsAtomFamily({
   getSnapshotAtom: archivedSnapshotAtom,
+  getConnectionStateAtom: environmentCatalog.stateAtom,
   labelPrefix: "web:archived-thread-snapshots",
 });
 

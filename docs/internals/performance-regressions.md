@@ -42,7 +42,7 @@ The v2 checks pin these invariants:
   route output deltas through `turn_item.updated`: a busy command would flood the event store and
   block ingestion for every other thread.
 - The initial shell contains active navigation rows only. Archived rows use the dedicated archive
-  query, and transcript message bodies stay in thread detail regardless of message size.
+  snapshot/stream, and transcript message bodies stay in thread detail regardless of message size.
 - Shell resume sends deltas plus compact repository-enrichment metadata, not another full project
   and thread snapshot.
 - Auto, steer, and restart sends resolve delivery from authoritative state inside the
