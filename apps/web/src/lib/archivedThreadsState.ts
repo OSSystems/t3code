@@ -5,13 +5,18 @@ import {
   makeArchivedThreadsEnvironmentKey,
 } from "@t3tools/client-runtime/state/threads";
 import type { EnvironmentId } from "@t3tools/contracts";
-import { useMemo } from "react";
 
 import { orchestrationEnvironment } from "../state/orchestration";
 
+function archivedSnapshotAtom(environmentId: EnvironmentId) {
+  return orchestrationEnvironment.archivedShell({
+    environmentId,
+    input: {},
+  });
+}
+
 const archivedSnapshotsAtom = createArchivedThreadSnapshotsAtomFamily({
-  getSnapshotAtom: (environmentId: EnvironmentId) =>
-    orchestrationEnvironment.archivedShell({ environmentId, input: {} }),
+  getSnapshotAtom: archivedSnapshotAtom,
   labelPrefix: "web:archived-thread-snapshots",
 });
 
@@ -20,9 +25,6 @@ export function useArchivedThreadSnapshots(environmentIds: ReadonlyArray<Environ
   readonly error: string | null;
   readonly isLoading: boolean;
 } {
-  const environmentKey = useMemo(
-    () => makeArchivedThreadsEnvironmentKey(environmentIds),
-    [environmentIds],
-  );
+  const environmentKey = makeArchivedThreadsEnvironmentKey(environmentIds);
   return useAtomValue(archivedSnapshotsAtom(environmentKey));
 }

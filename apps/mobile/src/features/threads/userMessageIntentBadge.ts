@@ -1,9 +1,11 @@
 import type { OrchestrationV2UserMessageInputIntent } from "@t3tools/contracts";
 
+import type { AppSymbolName } from "../../components/ui/AppSymbol";
+
 export interface UserMessageIntentBadgePresentation {
   readonly label: string;
   readonly accessibilityLabel: string;
-  readonly tone: "queued" | "steer";
+  readonly icon: AppSymbolName | null;
 }
 
 export function resolveUserMessageIntentBadge(
@@ -12,21 +14,21 @@ export function resolveUserMessageIntentBadge(
   switch (intent) {
     case "queued_turn":
       return {
-        label: "queued",
-        accessibilityLabel: "Queued behind the active turn",
-        tone: "queued",
+        label: "From queue",
+        accessibilityLabel: "Queued while the agent was busy",
+        icon: null,
       };
     case "steer":
       return {
-        label: "steer",
+        label: "Steer",
         accessibilityLabel: "Steered the active turn",
-        tone: "steer",
+        icon: "arrow.uturn.forward",
       };
     case "promoted_queued_to_steer":
       return {
-        label: "queued → steer",
+        label: "Steer",
         accessibilityLabel: "Originally queued, then promoted to steer the active turn",
-        tone: "steer",
+        icon: "arrow.uturn.forward",
       };
     case "turn_start":
     case undefined:
