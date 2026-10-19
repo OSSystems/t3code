@@ -18,7 +18,6 @@ import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
 import {
-  archivedShellItemsNeedSnapshot,
   archivedShellStream,
   archivedShellStreamItemFromThreadShell,
   buildActiveShellSnapshot,
@@ -264,36 +263,6 @@ describe("archivedShellStreamItemFromThreadShell", () => {
   });
 });
 
-describe("archivedShellItemsNeedSnapshot", () => {
-  const known = new Set([ProjectId.make("project-known")]);
-
-  it("needs a snapshot when a thread is archived in a project the subscriber has not seen", () => {
-    const thread = shellFixture({
-      projectId: ProjectId.make("project-new"),
-      archivedAt: "2026-07-30T00:00:00.000Z" as never,
-    });
-    expect(
-      archivedShellItemsNeedSnapshot([{ kind: "thread.updated", sequence: 4, thread }], known),
-    ).toBe(true);
-  });
-
-  it("keeps deltas for known projects and removals", () => {
-    const thread = shellFixture({
-      projectId: ProjectId.make("project-known"),
-      archivedAt: "2026-07-30T00:00:00.000Z" as never,
-    });
-    expect(
-      archivedShellItemsNeedSnapshot(
-        [
-          { kind: "thread.updated", sequence: 4, thread },
-          { kind: "thread.removed", sequence: 5, threadId: ThreadId.make("thread-b") },
-        ],
-        known,
-      ),
-    ).toBe(false);
-  });
-});
-
 describe("archivedShellStream", () => {
   const archivedAt = "2026-07-30T00:00:00.000Z" as never;
   const archivedSnapshot = (
@@ -320,30 +289,43 @@ describe("archivedShellStream", () => {
   it.effect("restarts from a fresh snapshot, outside the live budget, for an unseen project", () =>
     Effect.gen(function* () {
       // Larger than the live budget's byte limit.
-      const fresh = archivedSnapshot(7, ["project-known", "project-new"], "x".repeat(9 << 20));
+      const fresh = {
+        ...archivedSnapshot(7, ["project-known", "project-new"], "x".repeat(9 << 20)),
+        threads: [archived(3, "thread-b", "project-new").thread],
+      };
+      const initial = archivedSnapshot(1, ["project-known"]);
+      const knownUpdate = archived(2, "thread-a", "project-known");
+      const resumedUpdate = archived(8, "thread-d", "project-new");
+      const removal = {
+        kind: "thread.removed" as const,
+        sequence: 9,
+        threadId: resumedUpdate.thread.id,
+      };
       const segments: Array<number> = [];
       const items = yield* archivedShellStream({
-        snapshot: archivedSnapshot(1, ["project-known"]),
+        snapshot: initial,
         loadSnapshot: Effect.succeed(fresh),
         batchesFrom: (afterSequence) => {
           segments.push(afterSequence);
           return afterSequence === 1
             ? Stream.make(
-                [archived(2, "thread-a", "project-known")],
+                [knownUpdate],
                 [archived(3, "thread-b", "project-new")],
                 // Covered by the fresh snapshot, so the old segment must stop.
                 [archived(4, "thread-c", "project-known")],
               )
-            : Stream.make([archived(8, "thread-d", "project-new")]);
+            : Stream.make([resumedUpdate, removal]);
         },
       }).pipe(Stream.runCollect);
 
       expect(segments).toEqual([1, 7]);
-      expect(
-        Array.from(items, (item) =>
-          item.kind === "snapshot" ? item.snapshot.snapshotSequence : item.sequence,
-        ),
-      ).toEqual([1, 2, 7, 8]);
+      expect(items).toEqual([
+        { kind: "snapshot", snapshot: initial },
+        knownUpdate,
+        { kind: "snapshot", snapshot: fresh },
+        resumedUpdate,
+        removal,
+      ]);
     }),
   );
 });
