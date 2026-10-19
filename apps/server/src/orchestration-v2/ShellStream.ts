@@ -6,7 +6,6 @@ import type {
   OrchestrationV2ShellSnapshot,
   OrchestrationV2ThreadShell,
   OrchestrationV2ThreadShellSnapshot,
-  ProjectId,
   OrchestrationV2ShellStreamItem,
   OrchestrationV2StoredEvent,
 } from "@t3tools/contracts";
@@ -304,19 +303,6 @@ export function shellStreamItemFromThreadShell(input: {
 }
 
 /**
- * Archive deltas carry no project metadata, so a thread archived in a project
- * the subscriber has not seen yet needs a fresh snapshot to be grouped.
- */
-export function archivedShellItemsNeedSnapshot(
-  items: ReadonlyArray<OrchestrationV2ArchivedShellStreamItem>,
-  knownProjectIds: ReadonlySet<ProjectId>,
-): boolean {
-  return items.some(
-    (item) => item.kind === "thread.updated" && !knownProjectIds.has(item.thread.projectId),
-  );
-}
-
-/**
  * Streams the archive from `snapshot`. When a batch archives a thread in a
  * project the subscriber has not seen, the live segment ends and a new one
  * starts from a fresh snapshot. Snapshots go out like the initial one, outside
@@ -336,7 +322,10 @@ export function archivedShellStream<E, R, E2, R2>(input: {
   let resync: OrchestrationV2ArchivedShellSnapshot | undefined;
   const live = batchesFrom(input.snapshot.snapshotSequence).pipe(
     Stream.mapEffect((items) =>
-      archivedShellItemsNeedSnapshot(items, knownProjectIds)
+      // Archive deltas cannot supply metadata for an unseen project.
+      items.some(
+        (item) => item.kind === "thread.updated" && !knownProjectIds.has(item.thread.projectId),
+      )
         ? Effect.map(loadSnapshot, (fresh) => {
             resync = fresh;
             return [];
