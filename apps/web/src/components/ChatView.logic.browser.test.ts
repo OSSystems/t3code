@@ -59,3 +59,21 @@ it("refocuses the composer on window return from a clicked area after a bare key
   expect(document.activeElement).toBe(conversation);
   expect(shouldRefocusComposerOnWindowFocus(document.activeElement)).toBe(false);
 });
+
+it("keeps keyboard focus on the conversation timeline on window return, but not a click", async () => {
+  const timeline = document.createElement("div");
+  timeline.className = "messages-timeline-scroll";
+  timeline.tabIndex = -1;
+  timeline.textContent = "Assistant reply";
+  document.body.append(timeline);
+  using _timeline = { [Symbol.dispose]: () => timeline.remove() };
+
+  await userEvent.click(timeline);
+  expect(document.activeElement).toBe(timeline);
+  expect(shouldRefocusComposerOnWindowFocus(document.activeElement)).toBe(true);
+
+  timeline.blur();
+  await userEvent.keyboard("{F6}");
+  timeline.focus();
+  expect(shouldRefocusComposerOnWindowFocus(document.activeElement)).toBe(false);
+});
