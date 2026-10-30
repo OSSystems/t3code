@@ -117,8 +117,10 @@ import {
   OrchestrationGetTurnDiffError,
 } from "./checkpointDiff.ts";
 import {
-  ProjectEnvironmentAllowDirenvInput,
-  ProjectEnvironmentAllowDirenvResult,
+  ProjectEnvironmentApproveInput,
+  ProjectEnvironmentApproveResult,
+  ProjectEnvironmentStatus,
+  ProjectEnvironmentStatusInput,
 } from "./projectEnvironment.ts";
 import {
   WorktreeSetupCancelInput,
@@ -606,7 +608,8 @@ export const WS_METHODS = {
   subscribeVcsStatus: "subscribeVcsStatus",
   subscribeWorktreeSetup: "subscribeWorktreeSetup",
   worktreeSetupCancel: "worktreeSetup.cancel",
-  projectEnvironmentAllowDirenv: "projectEnvironment.allowDirenv",
+  projectEnvironmentStatus: "projectEnvironment.status",
+  projectEnvironmentApprove: "projectEnvironment.approve",
   subscribeTerminalMetadata: "subscribeTerminalMetadata",
   subscribePreviewEvents: "subscribePreviewEvents",
   subscribeDiscoveredLocalServers: "subscribeDiscoveredLocalServers",
@@ -1473,9 +1476,15 @@ const WsWorktreeSetupCancelRpc = Rpc.make(WS_METHODS.worktreeSetupCancel, {
   error: EnvironmentAuthorizationError,
 });
 
-const WsProjectEnvironmentAllowDirenvRpc = Rpc.make(WS_METHODS.projectEnvironmentAllowDirenv, {
-  payload: ProjectEnvironmentAllowDirenvInput,
-  success: ProjectEnvironmentAllowDirenvResult,
+const WsProjectEnvironmentStatusRpc = Rpc.make(WS_METHODS.projectEnvironmentStatus, {
+  payload: ProjectEnvironmentStatusInput,
+  success: ProjectEnvironmentStatus,
+  error: EnvironmentAuthorizationError,
+});
+
+const WsProjectEnvironmentApproveRpc = Rpc.make(WS_METHODS.projectEnvironmentApprove, {
+  payload: ProjectEnvironmentApproveInput,
+  success: ProjectEnvironmentApproveResult,
   error: EnvironmentAuthorizationError,
 });
 
@@ -2122,7 +2131,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeVcsStatusRpc,
   WsSubscribeWorktreeSetupRpc,
   WsWorktreeSetupCancelRpc,
-  WsProjectEnvironmentAllowDirenvRpc,
+  WsProjectEnvironmentStatusRpc,
+  WsProjectEnvironmentApproveRpc,
   WsVcsPullRpc,
   WsVcsRefreshStatusRpc,
   WsGitRunStackedActionRpc,
