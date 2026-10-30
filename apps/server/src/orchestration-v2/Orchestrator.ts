@@ -59,6 +59,7 @@ import {
   latestProviderTurnForAttempt,
   parseGoalCommand,
   orchestrationV2RunWorkStartedAt,
+  type ProjectId,
   ProviderInstanceId,
   ProviderInteractionMode,
   resolveProviderInstanceEnabled,
@@ -1087,13 +1088,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     readonly adapter: ProviderAdapter.ProviderAdapterV2["Service"];
     readonly providerInstanceId: ProviderInstanceId;
     readonly threadId: ThreadId;
+    readonly projectId: ProjectId;
   }) =>
     input.adapter.getCapabilities().pipe(
       Effect.flatMap((capabilities) =>
         capabilities.sessions.supportsMultipleProviderThreadsPerSession
           ? Effect.succeed(
+              // Per project: the process starts with that project's direnv environment.
               idAllocator.derive.providerSession({
                 providerInstanceId: input.providerInstanceId,
+                projectId: input.projectId,
               }),
             )
           : idAllocator.allocate.providerSession({
@@ -1893,6 +1897,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               adapter,
               providerInstanceId: queuedRun.providerInstanceId,
               threadId,
+              projectId: projection.thread.projectId,
             }),
           ),
           Effect.mapError(
@@ -4831,6 +4836,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             adapter: targetAdapter,
             providerInstanceId: input.modelSelection.instanceId,
             threadId: input.command.threadId,
+            projectId: input.projection.thread.projectId,
           }),
         ));
       const targetProviderThreadBase: OrchestrationV2ProviderThread =
@@ -6044,6 +6050,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             adapter,
             providerInstanceId: modelSelection.instanceId,
             threadId: command.threadId,
+            projectId: projection.thread.projectId,
           }),
         ));
       const providerThreadId =
@@ -6427,6 +6434,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           adapter,
           providerInstanceId: modelSelection.instanceId,
           threadId: command.threadId,
+          projectId: projection.thread.projectId,
         }),
       ));
     const existingProviderSession = projection.providerSessions.find(
