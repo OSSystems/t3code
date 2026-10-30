@@ -311,6 +311,7 @@ import { useProactivePanels } from "../hooks/useProactivePanels";
 import { useIncrementalTimelineEntries } from "../hooks/useIncrementalTimelineEntries";
 import { useRightPanelSurfaceClose } from "../hooks/useRightPanelSurfaceClose";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
+import { useProjectEnvironmentBanner } from "./chat/useProjectEnvironmentBanner";
 import { modelFallbackBannerItem } from "./chat/ComposerUsageLimits";
 import { ComposerSurface } from "./chat/ComposerSurface";
 import { resolveThreadSyncPhase } from "../threadSync";
@@ -1120,6 +1121,10 @@ export default function ChatView(props: ChatViewProps) {
   const activeProjectScripts = activeProject ? resolveProjectScripts(settings, activeProject) : [];
   const { projectCloneBannerItem, projectCloneSendBlockReason } =
     useProjectCloneBanner(activeProjectRef);
+  const projectEnvironmentBannerItem = useProjectEnvironmentBanner(
+    activeProjectRef,
+    isServerThread ? activeThreadId : null,
+  );
   const activeProjectDefaultModelSelection =
     !isServerThread && draftFallback
       ? draftFallback.selection
@@ -2620,6 +2625,8 @@ export default function ChatView(props: ChatViewProps) {
     const limitRecoveryItems = limitRecoveryBanner === null ? [] : [limitRecoveryBanner];
     const usageLimitsItems = usageLimitsBanner === null ? [] : [usageLimitsBanner];
     const projectCloneItems = projectCloneBannerItem === null ? [] : [projectCloneBannerItem];
+    const projectEnvironmentItems =
+      projectEnvironmentBannerItem === null ? [] : [projectEnvironmentBannerItem];
     if (!localCheckoutBranchMismatch || !showBranchMismatchBanner || !activeBranchMismatchKey) {
       return [
         ...feedbackBannerItems,
@@ -2627,6 +2634,7 @@ export default function ChatView(props: ChatViewProps) {
         ...limitRecoveryItems,
         ...usageLimitsItems,
         ...projectCloneItems,
+        ...projectEnvironmentItems,
         ...systemComposerBannerItems,
       ];
     }
@@ -2636,6 +2644,7 @@ export default function ChatView(props: ChatViewProps) {
       ...limitRecoveryItems,
       ...usageLimitsItems,
       ...projectCloneItems,
+      ...projectEnvironmentItems,
       ...systemComposerBannerItems,
       branchMismatchBannerItem({
         mismatchKey: activeBranchMismatchKey,
