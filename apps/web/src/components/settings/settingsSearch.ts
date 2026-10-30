@@ -607,13 +607,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
-    id: "direnv-environment",
-    title: "Load direnv environment",
-    to: "/settings/general",
-    scope: "project-defaults",
-    searchTerms: ["envrc nix flake devenv mise dev shell path tools environment variables agents"],
-  },
-  {
     id: "background-activity",
     title: "Background activity",
     to: "/settings/maintenance",
@@ -1048,6 +1041,20 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Actions",
     to: "/settings/projects",
     searchTerms: ["commands scripts setup run dev server checkout worktree t3.json import"],
+  },
+  {
+    id: "project-direnv",
+    title: "Load direnv environment",
+    to: "/settings/worktrees",
+    scope: "project-defaults",
+    searchTerms: ["direnv envrc nix flake devenv mise shell environment variables path allow"],
+  },
+  {
+    id: "project-direnv-trust",
+    title: "Trust .envrc changes",
+    to: "/settings/worktrees",
+    scope: "project-defaults",
+    searchTerms: ["direnv envrc approve allow changes automatically"],
   },
   {
     id: "environment-icon",
