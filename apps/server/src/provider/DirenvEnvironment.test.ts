@@ -1,3 +1,6 @@
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeCrypto from "node:crypto";
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { afterEach, describe, expect, it } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -6,6 +9,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import { vi } from "vite-plus/test";
@@ -66,13 +70,19 @@ describe("DirenvEnvironment.load", () => {
 
   it.effect("loads the exported variables from the nearest parent .envrc", () =>
     Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
       const { nested } = yield* makeProject;
+      // Reached through a symlink, as direnv does: the parent is the physical one.
+      const elsewhere = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-direnv-link-" });
+      const linked = path.join(elsewhere, "app");
+      yield* fileSystem.symlink(nested, linked);
       runMock.mockReturnValueOnce(
         Effect.succeed(output({ stdout: '{"PATH":"/nix/store/x/bin:/usr/bin","OLD":null}' })),
       );
       const direnv = yield* DirenvEnvironment.DirenvEnvironment;
 
-      const result = yield* direnv.load(nested);
+      const result = yield* direnv.load(linked);
 
       expect(result).toEqual({
         _tag: "Loaded",
@@ -80,7 +90,7 @@ describe("DirenvEnvironment.load", () => {
         changed: true,
       });
       expect(runMock).toHaveBeenCalledWith(
-        expect.objectContaining({ command: "direnv", args: ["export", "json"], cwd: nested }),
+        expect.objectContaining({ command: "direnv", args: ["export", "json"], cwd: linked }),
       );
     }).pipe(Effect.scoped, Effect.provide(TestLayer)),
   );
@@ -195,16 +205,65 @@ describe("DirenvEnvironment.load", () => {
 });
 
 describe("DirenvEnvironment.allow", () => {
-  it.effect("allows the .envrc governing the directory", () =>
+  it.effect("writes direnv's record for the given content and clears a deny", () =>
     Effect.gen(function* () {
-      const { envrcPath, nested } = yield* makeProject;
-      runMock.mockReturnValueOnce(Effect.succeed(output({})));
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const { envrcPath } = yield* makeProject;
+      const dataDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-direnv-data-" });
+      const digest = (data: string) => NodeCrypto.createHash("sha256").update(data).digest("hex");
+      const denyPath = path.join(dataDir, "deny", digest(`${envrcPath}\n`));
+      yield* fileSystem.makeDirectory(path.dirname(denyPath), { recursive: true });
+      yield* fileSystem.writeFileString(denyPath, `${envrcPath}\n`);
+      runMock.mockReturnValueOnce(
+        Effect.succeed(
+          output({
+            stdout: `Found RC path ${envrcPath}\nFound RC allowed 1\nFound RC allowPath ${path.join(dataDir, "allow", "current")}\n`,
+          }),
+        ),
+      );
       const direnv = yield* DirenvEnvironment.DirenvEnvironment;
 
-      expect(yield* direnv.allow(nested)).toEqual({ _tag: "Allowed", envrcPath });
-      expect(runMock).toHaveBeenCalledWith(
-        expect.objectContaining({ command: "direnv", args: ["allow", envrcPath] }),
-      );
+      // The reviewed content, even though the file on disk now holds something else.
+      expect(yield* direnv.allow(envrcPath, "use nix\n")).toEqual({ _tag: "Allowed" });
+      expect(
+        yield* fileSystem.readFileString(
+          path.join(dataDir, "allow", digest(`${envrcPath}\nuse nix\n`)),
+        ),
+      ).toBe(`${envrcPath}\n`);
+      expect(yield* fileSystem.exists(denyPath)).toBe(false);
+    }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+  );
+});
+
+describe("DirenvEnvironment.inspect", () => {
+  it.effect("trusts direnv's permission only for the content it judged", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const { envrcPath, nested } = yield* makeProject;
+      const digest = (data: string) => NodeCrypto.createHash("sha256").update(data).digest("hex");
+      const status = (allowed: number, content: string) =>
+        Effect.succeed(
+          output({
+            stdout: `Found RC path ${envrcPath}\nFound RC allowed ${allowed}\nFound RC allowPath /data/allow/${digest(`${envrcPath}\n${content}`)}\n`,
+          }),
+        );
+      runMock
+        .mockReturnValueOnce(status(0, "use flake\n"))
+        .mockReturnValueOnce(status(2, "use flake\n"))
+        // direnv saw approved content, but the file changed before T3 Code read it.
+        .mockReturnValueOnce(status(0, "approved\n"));
+      const direnv = yield* DirenvEnvironment.DirenvEnvironment;
+      const inspect = direnv.inspect(nested).pipe(Effect.map(Option.getOrNull));
+
+      expect(yield* inspect).toEqual({
+        path: envrcPath,
+        content: "use flake\n",
+        permission: "allowed",
+      });
+      expect((yield* inspect)?.permission).toBe("denied");
+      expect((yield* inspect)?.permission).toBe("blocked");
+      expect(yield* fileSystem.readFileString(envrcPath)).toBe("use flake\n");
     }).pipe(Effect.scoped, Effect.provide(TestLayer)),
   );
 });
