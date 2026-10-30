@@ -4283,10 +4283,6 @@
   "918cd5477d0c0e9b": "Mostrar mensagem completa",
   "513b0929ca7dde1b": "Entrada da ferramenta\n{input}",
   "c6e000ea79ae6a2b": "{status, select, inProgress {Lendo a thread “{title}”} completed {Leu a thread “{title}”} failed {Falha ao ler a thread “{title}”} declined {Recusou-se a ler a thread “{title}”} stopped {Parou de ler a thread “{title}”} other {Lendo a thread “{title}”}}",
-  "5b4f92a3a756615c": "Could not allow the .envrc",
-  "aa3492e231540ec4": "Allowed · applies to your next message",
-  "5a52bdeaa02b47a0": "Allowing…",
-  "fc61e2ab877a106d": "Allow .envrc",
   "93435595c79fd659": "Limite de uso atingido. Tente novamente após {resetTime}.",
   "5a2d803b3ea43f18": "Limite de uso atingido.",
   "1afc4f46bc0675aa": "{label}, falha na chamada de ferramenta",
@@ -4379,6 +4375,7 @@
       "c": "”"
     }
   ],
+  "7b48305ed33b0247": "Review .envrc",
   "a2aaca7ff8310186": "Abrir chat",
   "a3048aaa541b7744": "Atividade",
   "4a3cbccb2beedeb0": "imagem",

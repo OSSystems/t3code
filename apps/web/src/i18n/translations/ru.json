@@ -4283,10 +4283,6 @@
   "918cd5477d0c0e9b": "Показать сообщение полностью",
   "513b0929ca7dde1b": "Входные данные инструмента\n{input}",
   "c6e000ea79ae6a2b": "{status, select, inProgress {Чтение треда «{title}»} completed {Прочитан тред «{title}»} failed {Не удалось прочитать тред «{title}»} declined {Отклонено чтение треда «{title}»} stopped {Остановлено чтение треда «{title}»} other {Чтение треда «{title}»}}",
-  "5b4f92a3a756615c": "Could not allow the .envrc",
-  "aa3492e231540ec4": "Allowed · applies to your next message",
-  "5a52bdeaa02b47a0": "Allowing…",
-  "fc61e2ab877a106d": "Allow .envrc",
   "93435595c79fd659": "Достигнут лимит использования. Повторите после {resetTime}.",
   "5a2d803b3ea43f18": "Достигнут лимит использования.",
   "1afc4f46bc0675aa": "{label}, ошибка вызова инструмента",
@@ -4379,6 +4375,7 @@
       "c": "»"
     }
   ],
+  "7b48305ed33b0247": "Review .envrc",
   "a2aaca7ff8310186": "Открыть чат",
   "a3048aaa541b7744": "Активность",
   "4a3cbccb2beedeb0": "изображение",

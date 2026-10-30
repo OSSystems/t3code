@@ -4274,10 +4274,6 @@
   "918cd5477d0c0e9b": "メッセージ全体を表示",
   "513b0929ca7dde1b": "ツールの入力\n{input}",
   "c6e000ea79ae6a2b": "{status, select, inProgress {スレッド「{title}」を読み取っています} completed {スレッド「{title}」を読み取りました} failed {スレッド「{title}」を読み取れませんでした} declined {スレッド「{title}」の読み取りは拒否されました} stopped {スレッド「{title}」の読み取りを中止しました} other {スレッド「{title}」を読み取っています}}",
-  "5b4f92a3a756615c": "Could not allow the .envrc",
-  "aa3492e231540ec4": "Allowed · applies to your next message",
-  "5a52bdeaa02b47a0": "Allowing…",
-  "fc61e2ab877a106d": "Allow .envrc",
   "93435595c79fd659": "使用量の上限に達しました。{resetTime} 以降に再試行してください。",
   "5a2d803b3ea43f18": "使用量の上限に達しました。",
   "1afc4f46bc0675aa": "{label}、ツール呼び出しに失敗しました",
@@ -4370,6 +4366,7 @@
       "c": "」を読み取っています"
     }
   ],
+  "7b48305ed33b0247": "Review .envrc",
   "a2aaca7ff8310186": "チャットを開く",
   "a3048aaa541b7744": "アクティビティ",
   "4a3cbccb2beedeb0": "画像",
