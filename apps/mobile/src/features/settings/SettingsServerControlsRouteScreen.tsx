@@ -68,6 +68,8 @@ const PAGE_PROJECT_KEYS: Record<SettingsPage, readonly ProjectScopedServerSettin
     "branchNamingMode",
     "branchNamePrefix",
     "branchNameInstructions",
+    "enableDirenvEnvironment",
+    "trustDirenvChanges",
   ],
   maintenance: ["continueThreadsAfterServerUpdate"],
 };
@@ -448,6 +450,24 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                         onPress={() => write({ worktreeSubmodules: choice.mode })}
                       />
                     ))}
+                  </SettingsSection>
+                  <SettingsSection title="direnv environment">
+                    <SettingsSwitchRow
+                      icon="terminal"
+                      label="Load direnv environment"
+                      subtitle="Load the project's .envrc for agents and worktree setup scripts. T3 Code asks before loading each new .envrc."
+                      value={uniform("enableDirenvEnvironment")}
+                      disabled={disabledFor("enableDirenvEnvironment")}
+                      onValueChange={(value) => write({ enableDirenvEnvironment: value })}
+                    />
+                    <SettingsSwitchRow
+                      icon="checkmark.circle"
+                      label="Trust .envrc changes"
+                      subtitle="Approve changes to an approved .envrc without asking. Only for repositories you fully control."
+                      value={uniform("trustDirenvChanges")}
+                      disabled={disabledFor("trustDirenvChanges")}
+                      onValueChange={(value) => write({ trustDirenvChanges: value })}
+                    />
                   </SettingsSection>
                   <BranchNamingSettings
                     key={targetsKey}
