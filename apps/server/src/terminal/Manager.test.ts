@@ -1449,6 +1449,10 @@ it.layer(
       });
       yield* manager.open(openInput());
       yield* manager.open(openInput({ terminalId: "explicit", env: { TMUX_PANE: "%9" } }));
+      yield* manager.open({
+        ...openInput({ terminalId: "unset" }),
+        unsetEnv: ["TEST_TERMINAL_KEEP"],
+      });
       const spawnInput = ptyAdapter.spawnInputs[0];
       expect(spawnInput).toBeDefined();
       if (!spawnInput) return;
@@ -1462,6 +1466,7 @@ it.layer(
       expect(spawnInput.env.ZELLIJ_SESSION_NAME).toBeUndefined();
       expect(spawnInput.env.ZELLIJ_CONFIG_DIR).toBe("/home/user/.config/zellij");
       expect(ptyAdapter.spawnInputs[1]?.env.TMUX_PANE).toBe("%9");
+      expect(ptyAdapter.spawnInputs[2]?.env.TEST_TERMINAL_KEEP).toBeUndefined();
     }),
   );
 
