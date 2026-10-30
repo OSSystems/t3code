@@ -185,6 +185,7 @@ import { PendingApprovalCard } from "./PendingApprovalCard";
 import { ComposerErrorNotice } from "./ComposerErrorNotice";
 import { ManagedRuntimeModeNotice } from "./ManagedRuntimeModeNotice";
 import { FreshSessionNotice } from "./FreshSessionNotice";
+import { ProjectEnvironmentBanner } from "./ProjectEnvironmentBanner";
 import { ComposerFeedback } from "./ComposerFeedback";
 import { ComposerUsageLimits } from "./ComposerUsageLimits";
 import { PendingUserInputCard } from "./PendingUserInputCard";
@@ -1765,6 +1766,12 @@ function ThreadDetailBody(
                     {freshSessionAvailable ? (
                       <FreshSessionNotice threadKey={selectedThreadKey} />
                     ) : null}
+                    <ProjectEnvironmentBanner
+                      className="shrink-0 px-4 pb-2"
+                      environmentId={props.environmentId}
+                      projectId={props.selectedThread.projectId}
+                      threadId={props.selectedThread.id}
+                    />
                     {props.canOperateThread ? (
                       <ManagedRuntimeModeNotice
                         threadKey={selectedThreadKey}
