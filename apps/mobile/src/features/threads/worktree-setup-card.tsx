@@ -44,6 +44,7 @@ const stageLabels = {
   fetch: msg("Fetch base branch"),
   checkout: msg("Check out files"),
   submodules: msg("Init submodules"),
+  environment: "Load direnv environment",
   "setup-script": msg("Run setup script"),
   agent: msg("Start agent"),
 } as const satisfies Record<WorktreeSetupStage["id"], string>;
