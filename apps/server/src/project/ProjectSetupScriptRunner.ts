@@ -74,6 +74,8 @@ export interface ProjectSetupScriptRunnerInput {
   readonly observeCompletion?: {
     readonly onOutputLine?: (line: string) => Effect.Effect<void>;
   };
+  /** The project's direnv diff, so the script sees the same tools as the agent. */
+  readonly environment?: Readonly<Record<string, string | null>>;
 }
 
 export class ProjectSetupScriptOperationError extends Schema.TaggedError<ProjectSetupScriptOperationError>()(
@@ -433,7 +435,14 @@ export const make = Effect.gen(function* () {
         ? `settle-${script.id}-${(yield* random.uuidV4()).slice(0, 8)}`
         : `setup-${script.id}`;
     const cwd = input.worktreePath;
+    const direnvSet: Record<string, string> = {};
+    const unsetEnv: string[] = [];
+    for (const [name, value] of Object.entries(input.environment ?? {})) {
+      if (value === null) unsetEnv.push(name);
+      else direnvSet[name] = value;
+    }
     const env = {
+      ...direnvSet,
       ...projectScriptRuntimeEnv({
         project: { cwd: project.workspaceRoot },
         worktreePath: input.worktreePath,
@@ -470,6 +479,7 @@ export const make = Effect.gen(function* () {
           cwd,
           worktreePath: input.worktreePath,
           env: { ...env, NO_COLOR: "1", FORCE_COLOR: "0" },
+          ...(unsetEnv.length > 0 ? { unsetEnv } : {}),
         })
         .pipe(
           Effect.andThen(() =>
