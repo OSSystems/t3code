@@ -68,6 +68,7 @@ import { projectEnvironment } from "../../state/projects";
 import { sourceControlEnvironment } from "../../state/sourceControl";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { ProjectCloneBanner } from "./ProjectCloneBanner";
+import { ProjectEnvironmentBanner } from "./ProjectEnvironmentBanner";
 import {
   describeUnavailableModelSelection,
   isModelSelectionUnavailable,
@@ -902,6 +903,14 @@ export function NewTaskDraftScreen(props: {
 
   const draftControls = (viewportHeight: number) => (
     <View className="pb-1">
+      {selectedProject ? (
+        <ProjectEnvironmentBanner
+          className="px-1 pb-2"
+          environmentId={selectedProject.environmentId}
+          projectId={selectedProject.id}
+          threadId={null}
+        />
+      ) : null}
       {projectClone && projectClone.phase !== "done" && selectedProject ? (
         <View className="px-1 pb-2">
           <ProjectCloneBanner
