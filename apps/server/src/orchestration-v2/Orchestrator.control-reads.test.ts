@@ -198,6 +198,50 @@ it.effect(
     }).pipe(Effect.provide(layerTest)),
 );
 
+it.effect("gives each project its own shared provider session", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    // One process per project lets each start with that project's direnv environment.
+    const sessionFor = Effect.fn(function* (name: string, project: string) {
+      const threadId = ThreadId.make(`thread:session-${name}`);
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make(`create-session-${name}`),
+        threadId,
+        projectId: ProjectId.make(project),
+        title: name,
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        createdBy: "user",
+        creationSource: "web",
+      });
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make(`dispatch-session-${name}`),
+        threadId,
+        messageId: MessageId.make(`dispatch-session-${name}`),
+        text: "Start",
+        attachments: [],
+        dispatchMode: { type: "defer_start" },
+        createdBy: "user",
+        creationSource: "web",
+      });
+      return (yield* projections.getThreadProjection(threadId)).providerThreads[0]
+        ?.providerSessionId;
+    });
+    const a1 = yield* sessionFor("a1", "project:session-a");
+    const a2 = yield* sessionFor("a2", "project:session-a");
+    const b1 = yield* sessionFor("b1", "project:session-b");
+    assert.ok(a1);
+    assert.equal(a2, a1);
+    assert.notEqual(b1, a1);
+  }).pipe(Effect.provide(layerTest)),
+);
+
 it.effect("marks a never-visited thread's first completion unread", () =>
   Effect.gen(function* () {
     const orchestrator = yield* Orchestrator.OrchestratorV2;
