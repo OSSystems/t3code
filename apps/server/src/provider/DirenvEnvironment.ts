@@ -1,4 +1,6 @@
-import type { ThreadId } from "@t3tools/contracts";
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeCrypto from "node:crypto";
+
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
@@ -45,9 +47,21 @@ export type DirenvLoadResult =
 
 export type DirenvLoadFailure = Extract<DirenvLoadResult, { readonly _tag: "Failed" }>;
 
+export interface DirenvEnvrc {
+  readonly path: string;
+  readonly content: string;
+  /** direnv's own record for this content at this path; `denied` came from `direnv deny`. */
+  readonly permission: "allowed" | "blocked" | "denied";
+}
+
+interface DirenvStatus {
+  readonly rcPath: string;
+  readonly allowed: number;
+  readonly allowPath: string;
+}
+
 export type DirenvAllowResult =
-  | { readonly _tag: "Allowed"; readonly envrcPath: string }
-  | { readonly _tag: "NotFound" }
+  | { readonly _tag: "Allowed" }
   | { readonly _tag: "Failed"; readonly message: string };
 
 /**
@@ -69,18 +83,24 @@ export class DirenvEnvironment extends Context.Service<
       cwd: string,
       previous?: DirenvEnvironmentDiff,
     ) => Effect.Effect<DirenvLoadResult>;
-    /** `direnv allow` the `.envrc` governing `cwd`. */
-    readonly allow: (cwd: string) => Effect.Effect<DirenvAllowResult>;
+    /**
+     * Allow `content` at `envrcPath`, as `direnv allow` would for that file. Writing direnv's
+     * record for the given bytes, rather than running `direnv allow` on whatever the path
+     * holds by then, means a file replaced after review stays blocked.
+     */
+    readonly allow: (envrcPath: string, content: string) => Effect.Effect<DirenvAllowResult>;
+    /** The `.envrc` governing `cwd`; none without one, on Windows, or without direnv. */
+    readonly inspect: (cwd: string) => Effect.Effect<Option.Option<DirenvEnvrc>>;
   }
 >()("t3/provider/DirenvEnvironment") {}
 
 const DIRENV_FAILURE_MESSAGES: Record<DirenvFailureReason, string> = {
-  blocked: "The project's .envrc is blocked, so its direnv environment was not loaded.",
+  blocked: "The project's .envrc needs your approval, so its direnv environment was not loaded.",
   timeout: "Loading the project's direnv environment timed out.",
   failed: "The project's direnv environment failed to load.",
 };
 
-/** What a thread shows for a failed load; a blocked `.envrc` offers to allow it. */
+/** What a thread shows for a failed load; a blocked `.envrc` offers to review it. */
 export function direnvFailureNotice(failure: DirenvLoadFailure): {
   readonly message: string;
   readonly detail: string;
@@ -123,7 +143,10 @@ const make = Effect.fn("DirenvEnvironment.make")(function* () {
   const platform = yield* HostProcess.Platform;
 
   const findEnvrc = Effect.fn("DirenvEnvironment.findEnvrc")(function* (cwd: string) {
-    let directory = path.resolve(cwd);
+    // direnv walks the physical directory's ancestors, not the symlinked ones.
+    let directory = yield* fileSystem
+      .realPath(cwd)
+      .pipe(Effect.orElseSucceed(() => path.resolve(cwd)));
     while (true) {
       const candidate = path.join(directory, ".envrc");
       if (yield* fileSystem.exists(candidate).pipe(Effect.orElseSucceed(() => false))) {
@@ -208,21 +231,78 @@ const make = Effect.fn("DirenvEnvironment.make")(function* () {
       );
     });
 
-  const allow = Effect.fn("DirenvEnvironment.allow")(function* (cwd: string) {
-    const envrcPath = yield* findEnvrc(cwd);
-    if (Option.isNone(envrcPath)) return { _tag: "NotFound" } as const;
+  // Mirrors direnv's rc.go: sha256 of the path, a newline and the content names the allow
+  // record, which holds the path; the deny record is named by the path alone.
+  const digest = (data: string) => NodeCrypto.createHash("sha256").update(data).digest("hex");
+
+  /** direnv's own view of the `.envrc` governing `cwd`: its physical path and records. */
+  const readStatus = Effect.fn("DirenvEnvironment.readStatus")(function* (cwd: string) {
     const result = yield* runner
-      .run({ command: "direnv", args: ["allow", envrcPath.value], cwd })
+      .run({ command: "direnv", args: ["status"], cwd })
       .pipe(Effect.result);
-    if (result._tag === "Failure") {
-      return { _tag: "Failed", message: result.failure.message } as const;
-    }
-    return result.success.code === 0
-      ? ({ _tag: "Allowed", envrcPath: envrcPath.value } as const)
-      : ({ _tag: "Failed", message: direnvErrorMessage(result.success.stderr) } as const);
+    if (result._tag === "Failure") return Option.none<DirenvStatus>();
+    const field = (name: string) =>
+      new RegExp(`^Found RC ${name} (.+)$`, "m").exec(result.success.stdout)?.[1]?.trim();
+    const rcPath = field("path");
+    const allowPath = field("allowPath");
+    if (rcPath === undefined || allowPath === undefined) return Option.none<DirenvStatus>();
+    return Option.some({ rcPath, allowed: Number(field("allowed")), allowPath });
   });
 
-  return DirenvEnvironment.of({ load, allow });
+  const allow = Effect.fn("DirenvEnvironment.allow")(function* (
+    envrcPath: string,
+    content: string,
+  ) {
+    const failed = (message: string) => ({ _tag: "Failed", message }) as const;
+    const status = yield* readStatus(path.dirname(envrcPath));
+    if (Option.isNone(status) || status.value.rcPath !== envrcPath) {
+      return failed("direnv did not report the .envrc that was reviewed.");
+    }
+    const allowDir = path.dirname(status.value.allowPath);
+    const written = yield* fileSystem
+      .makeDirectory(allowDir, { recursive: true })
+      .pipe(
+        Effect.andThen(
+          fileSystem.writeFileString(
+            path.join(allowDir, digest(`${envrcPath}\n${content}`)),
+            `${envrcPath}\n`,
+          ),
+        ),
+        Effect.andThen(
+          fileSystem
+            .remove(path.join(path.dirname(allowDir), "deny", digest(`${envrcPath}\n`)))
+            .pipe(Effect.catchTags({ PlatformError: () => Effect.void })),
+        ),
+        Effect.result,
+      );
+    return written._tag === "Failure"
+      ? failed(written.failure.message)
+      : ({ _tag: "Allowed" } as const);
+  });
+
+  const inspect = Effect.fn("DirenvEnvironment.inspect")(function* (cwd: string) {
+    if (platform === "win32") return Option.none<DirenvEnvrc>();
+    // Cheap check first, so projects without an `.envrc` never spawn direnv.
+    if (Option.isNone(yield* findEnvrc(cwd))) return Option.none<DirenvEnvrc>();
+    // Having an `.envrc` without direnv installed is common in shared repos.
+    const status = yield* readStatus(cwd);
+    if (Option.isNone(status)) return Option.none<DirenvEnvrc>();
+    const { rcPath, allowed, allowPath } = status.value;
+    const content = yield* fileSystem
+      .readFileString(rcPath)
+      .pipe(Effect.orElseSucceed(() => undefined));
+    if (content === undefined) return Option.none<DirenvEnvrc>();
+    // direnv judged the file as it was when it ran; only trust that for the same bytes.
+    const sameContent = path.basename(allowPath) === digest(`${rcPath}\n${content}`);
+    return Option.some<DirenvEnvrc>({
+      path: rcPath,
+      content,
+      // direnv reports 0 for allowed, 1 for not allowed and 2 for denied.
+      permission: allowed === 2 ? "denied" : allowed === 0 && sameContent ? "allowed" : "blocked",
+    });
+  });
+
+  return DirenvEnvironment.of({ load, allow, inspect });
 });
 
 export const layer = Layer.effect(DirenvEnvironment, make());

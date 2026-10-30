@@ -44,6 +44,7 @@ import { ProviderWorkspaceMissingError } from "../provider/Errors.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as DirenvEnvironment from "../provider/DirenvEnvironment.ts";
+import * as ProjectEnvironmentService from "../project/ProjectEnvironmentService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
 import * as EventSink from "./EventSink.ts";
@@ -403,17 +404,18 @@ export const layerWithOptions = (
         },
       );
       const direnv = yield* Effect.serviceOption(DirenvEnvironment.DirenvEnvironment);
+      const projectEnvironment = yield* Effect.serviceOption(
+        ProjectEnvironmentService.ProjectEnvironmentService,
+      );
       const direnvEnabled = Effect.fn("ProviderSessionManagerV2.direnvEnabled")(
-        function* (threadId: ThreadId) {
-          if (Option.isNone(serverSettings)) return true;
-          const settings = yield* serverSettings.value.getSettings;
+        function* (threadId: ThreadId, cwd: string) {
+          if (Option.isNone(projectEnvironment)) return false;
           const thread = yield* projectionStore.getThread(threadId);
-          return resolveProjectSettings(settings, thread.projectId).settings
-            .enableDirenvEnvironment;
+          return yield* projectEnvironment.value.prepare(thread.projectId, cwd);
         },
         Effect.catch((cause) =>
           Effect.logWarning(
-            "Could not resolve the direnv setting; starting the provider without the project's environment.",
+            "Could not resolve the project's direnv environment; starting the provider without it.",
             { cause },
           ).pipe(Effect.as(false)),
         ),
@@ -449,7 +451,7 @@ export const layerWithOptions = (
         DirenvEnvironment.setThreadDirenvEnvironment(threadId, preloaded);
         if (cwd === null) return null;
         if (preloaded !== undefined) return { cwd, diff: preloaded } as SessionDirenvEnvironment;
-        if (Option.isNone(direnv) || !(yield* direnvEnabled(threadId))) return null;
+        if (Option.isNone(direnv) || !(yield* direnvEnabled(threadId, cwd))) return null;
         const result = yield* direnv.value.load(cwd);
         yield* Effect.annotateCurrentSpan({ "provider.direnv.result": result._tag });
         recordDirenvResult(threadId, result);
@@ -458,17 +460,16 @@ export const layerWithOptions = (
         return { cwd, diff } as SessionDirenvEnvironment;
       });
       /**
-       * Re-check a live session's direnv environment before reusing it, as a
-       * shell hook does on each prompt: direnv compares the files it watches
-       * (the `.envrc`, its allow record, `flake.lock`, ...) and only evaluates
-       * again when one changed. `restart` means the process should start over
-       * with `diff`.
+       * Re-check a live session's direnv environment before reusing it, as a shell hook does
+       * on each prompt: direnv only evaluates again when a watched file changed. `restart`
+       * means the process should start over with `diff`.
        */
       const checkDirenvEnvironment = Effect.fn("ProviderSessionManagerV2.checkDirenvEnvironment")(
         function* (entry: LiveSessionEntry, threadId: ThreadId, cwd: string | null) {
           const loaded = entry.direnv?.diff;
           if (Option.isNone(direnv) || cwd === null) return { restart: false } as const;
-          if (!(yield* direnvEnabled(threadId))) return { restart: loaded !== undefined } as const;
+          if (!(yield* direnvEnabled(threadId, cwd)))
+            return { restart: loaded !== undefined } as const;
           const previous = entry.direnv?.cwd === cwd ? loaded : undefined;
           const result = yield* direnv.value.load(cwd, previous);
           yield* Effect.annotateCurrentSpan({ "provider.direnv.refresh": result._tag });
@@ -2258,16 +2259,45 @@ export const layerWithOptions = (
                     cause: `Provider ${existing.runtime.driver} does not support attaching multiple app threads to one session.`,
                   });
                 }
-                // Restarting the process would cut off work in flight or other
-                // threads sharing it; those pick the change up once it idles.
-                const ownedIdle =
-                  existing.busyTurns.size === 0 &&
-                  existing.attachedThreadIds.size === 1 &&
-                  existing.attachedThreadIds.has(input.threadId);
-                const direnvRefresh = ownedIdle
-                  ? yield* checkDirenvEnvironment(existing, input.threadId, cwd)
-                  : ({ restart: false } as const);
-                if (!direnvRefresh.restart) {
+                // Restarting cuts off work in flight, in any thread sharing the process, so
+                // a change waits until the whole session idles, as an idle release would.
+                const idleGeneration = Effect.gen(function* () {
+                  const latest = (yield* Ref.get(sessions)).get(key);
+                  if (latest?.runtime !== existing.runtime || latest.busyTurns.size > 0) {
+                    return undefined;
+                  }
+                  const busy =
+                    existing.runtime.hasPendingBackgroundWork === undefined
+                      ? false
+                      : yield* existing.runtime.hasPendingBackgroundWork.pipe(
+                          Effect.catchCause(() => Effect.succeed(true)),
+                        );
+                  return busy ? undefined : latest.idleGeneration;
+                });
+                // The process keeps the directory it started in, whichever thread joins.
+                const direnvCwd = existing.direnv?.cwd ?? cwd;
+                const direnvRefresh =
+                  (yield* idleGeneration) !== undefined
+                    ? yield* checkDirenvEnvironment(existing, input.threadId, direnvCwd)
+                    : ({ restart: false } as const);
+                if (direnvRefresh.restart) {
+                  const generation = yield* idleGeneration;
+                  if (generation !== undefined) {
+                    yield* Effect.logInfo("orchestration-v2.provider-session.environment-changed", {
+                      providerSessionId: input.providerSessionId,
+                      threadId: input.threadId,
+                    });
+                    // Keeps the session if a turn started while the probes yielded.
+                    yield* releaseEntry({
+                      providerSessionId: input.providerSessionId,
+                      reason: "environment_changed",
+                      onlyIfIdleGeneration: generation,
+                    });
+                  }
+                }
+                // direnv can take minutes: a session still live is reused, and one an idle
+                // release closed meanwhile needs a new process rather than reuse.
+                if ((yield* Ref.get(sessions)).get(key)?.runtime === existing.runtime) {
                   // Joining a shared session is a new session for this thread.
                   if (!attached) yield* agentScope.clear(input.threadId);
                   yield* ensureThreadAttached({
@@ -2278,15 +2308,9 @@ export const layerWithOptions = (
                   yield* touchActivity(input.providerSessionId);
                   return existing.exposedRuntime;
                 }
-                yield* Effect.logInfo("orchestration-v2.provider-session.environment-changed", {
-                  providerSessionId: input.providerSessionId,
-                  threadId: input.threadId,
-                });
-                yield* releaseEntry({
-                  providerSessionId: input.providerSessionId,
-                  reason: "environment_changed",
-                });
-                preloadedDirenv = "diff" in direnvRefresh ? direnvRefresh.diff : undefined;
+                // The replacement starts in this thread's directory; only reuse a diff for it.
+                preloadedDirenv =
+                  "diff" in direnvRefresh && direnvCwd === cwd ? direnvRefresh.diff : undefined;
               }
 
               const adapter = yield* registry.get(input.modelSelection.instanceId).pipe(

@@ -86,6 +86,7 @@ import * as ServerBrowserStream from "./preview/ServerBrowserStream.ts";
 import * as PreviewBrowser from "./preview/PreviewBrowser.ts";
 import * as ProcessRunner from "./processRunner.ts";
 import * as DirenvEnvironment from "./provider/DirenvEnvironment.ts";
+import * as ProjectEnvironmentService from "./project/ProjectEnvironmentService.ts";
 import * as GitManager from "./git/GitManager.ts";
 import * as EnvironmentTheme from "./environmentTheme.ts";
 import * as Keybindings from "./keybindings.ts";
@@ -519,6 +520,12 @@ const layerScheduledTaskWebhookOrigin = Layer.effect(
 );
 
 const layerOrchestrationV2Runtime = RuntimeLayer.layerProduction.pipe(
+  Layer.provideMerge(
+    ProjectEnvironmentService.layer.pipe(
+      Layer.provide(RuntimeLayer.layerProjectService),
+      Layer.provide(ProjectionStoreV2.layer),
+    ),
+  ),
   Layer.provideMerge(DirenvEnvironment.layer.pipe(Layer.provide(ProcessRunner.layer))),
   Layer.provide(layerScheduledTaskWebhookOrigin),
   Layer.provide(ProviderEventIngestor.layerAnalytics),

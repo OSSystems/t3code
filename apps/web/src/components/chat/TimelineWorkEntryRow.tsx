@@ -13,7 +13,6 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { useAtomValue } from "@effect/atom-react";
 import { Link } from "@tanstack/react-router";
 import { notificationChildThreadId } from "@t3tools/client-runtime/state/thread-execution";
 import {
@@ -38,9 +37,9 @@ import { ChevronRightIcon, CircleAlertIcon, XIcon, RotateCcwIcon } from "lucide-
 import { Button, InlineButton } from "../ui/button";
 import { useAssetUrls } from "../../assets/assetUrls";
 import { useThreadShell } from "../../state/entities";
-import { threadEnvironment } from "../../state/threads";
-import { useAtomCommand } from "../../state/use-atom-command";
-import { toastManager } from "../ui/toast";
+import { useEnvironmentQuery } from "../../state/query";
+import { appAtomRegistry } from "../../rpc/atomRegistry";
+import { projectEnvironment } from "../../state/projectEnvironment";
 import {
   threadReadLabelPrefix,
   threadReadTargetId,
@@ -153,61 +152,26 @@ type WorkEntryRowProps = {
   onToggleEntry?: ((collapsed: boolean) => void) | undefined;
 };
 
-/** Allows the thread's blocked `.envrc`; the next message loads it. */
-// The virtualized timeline remounts rows, so the outcome outlives the button.
-const allowedDirenvWarnings = new Set<string>();
-
-function AllowDirenvButton({
-  threadRef,
-  warningId,
-}: {
-  readonly threadRef: ScopedThreadRef;
-  readonly warningId: string;
-}) {
-  const allowDirenv = useAtomCommand(threadEnvironment.allowDirenv);
-  const [state, setState] = useState<"idle" | "pending" | "allowed">(() =>
-    allowedDirenvWarnings.has(warningId) ? "allowed" : "idle",
-  );
-  // Clients without the operate grant can read the warning but not act on it.
-  const permitted = useAtomValue(
-    threadEnvironment.allowDirenv.permissionAtom(threadRef.environmentId),
-  );
-  if (!permitted) return null;
-  const onClick = async (event: MouseEvent<HTMLButtonElement>) => {
+/** Brings back the composer's review of the thread's blocked `.envrc`. */
+function ReviewEnvrcButton({ threadRef }: { readonly threadRef: ScopedThreadRef }) {
+  const shell = useThreadShell(threadRef);
+  const target = shell ? { ...threadRef, projectId: shell.projectId } : null;
+  const status = useEnvironmentQuery(target ? projectEnvironment.statusAtom(target) : null);
+  if (target === null || status.data?.pending === "none") return null;
+  const onClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
-    setState("pending");
-    const result = await allowDirenv({
-      environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId },
-    });
-    if (result._tag === "Success" && result.value.allowed) {
-      allowedDirenvWarnings.add(warningId);
-      setState("allowed");
-      return;
-    }
-    setState("idle");
-    if (result._tag === "Success") {
-      toastManager.add({
-        type: "error",
-        title: "Could not allow the .envrc",
-        description: result.value.error,
-      });
-    }
+    projectEnvironment.reviewAgain(appAtomRegistry, target);
+    status.refresh();
   };
   return (
     <Button
-      disabled={state !== "idle"}
       onClick={onClick}
       onKeyDown={(event) => event.stopPropagation()}
       size="xs"
       type="button"
       variant="ghost-muted"
     >
-      {state === "allowed"
-        ? "Allowed · applies to your next message"
-        : state === "pending"
-          ? "Allowing…"
-          : "Allow .envrc"}
+      Review .envrc
     </Button>
   );
 }
@@ -552,7 +516,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
             <XIcon aria-hidden className={cn("size-3 shrink-0", failedToolIconClassName)} />
           ) : null}
           {workEntry.warningAction?.type === "direnv.allow" && threadRef ? (
-            <AllowDirenvButton threadRef={threadRef} warningId={workEntry.id} />
+            <ReviewEnvrcButton threadRef={threadRef} />
           ) : null}
           <TimelineRowTimestamp createdAt={workEntry.createdAt} timestampFormat={timestampFormat} />
           <span

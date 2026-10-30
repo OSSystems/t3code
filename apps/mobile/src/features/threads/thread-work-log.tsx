@@ -33,7 +33,6 @@ import {
 } from "react";
 import {
   Animated as NativeAnimated,
-  Alert,
   type ColorValue,
   Easing,
   Pressable,
@@ -54,6 +53,10 @@ import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { environmentThreadDetails, threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { useThreadShell } from "../../state/entities";
+import { useEnvironmentQuery } from "../../state/query";
+import { appAtomRegistry } from "../../state/atom-registry";
+import { projectEnvironment } from "../../state/projectEnvironment";
 import { toolActivityFaviconUrl } from "@t3tools/shared/favicon";
 import { isJavaScriptReplTool } from "@t3tools/shared/toolActivity";
 import { useMarkdownCodeHighlight } from "./markdownCodeHighlightState";
@@ -855,53 +858,28 @@ function ReplCodeText({
   );
 }
 
-/** Allows the thread's blocked `.envrc`; the next message loads it. */
-// The work log remounts rows, so the outcome outlives the button.
-const allowedDirenvWarnings = new Set<string>();
-
-function AllowDirenvButton(props: {
+/** Brings back the composer's review of the thread's blocked `.envrc`. */
+function ReviewEnvrcButton(props: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
-  readonly warningId: string;
 }) {
-  const allowDirenv = useAtomCommand(threadEnvironment.allowDirenv, "allow direnv");
-  const [state, setState] = useState<"idle" | "pending" | "allowed">(() =>
-    allowedDirenvWarnings.has(props.warningId) ? "allowed" : "idle",
-  );
-  // Clients without the operate grant can read the warning but not act on it.
-  const permitted = useAtomValue(threadEnvironment.allowDirenv.permissionAtom(props.environmentId));
-  if (!permitted) return null;
+  const shell = useThreadShell(scopeThreadRef(props.environmentId, props.threadId));
+  const target = shell
+    ? { environmentId: props.environmentId, projectId: shell.projectId, threadId: props.threadId }
+    : null;
+  const status = useEnvironmentQuery(target ? projectEnvironment.statusAtom(target) : null);
+  if (target === null || status.data?.pending === "none") return null;
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityHint="Loads the project's direnv environment with your next message."
-      disabled={state !== "idle"}
       hitSlop={6}
-      onPress={async () => {
-        setState("pending");
-        const result = await allowDirenv({
-          environmentId: props.environmentId,
-          input: { threadId: props.threadId },
-        });
-        if (result._tag === "Success" && result.value.allowed) {
-          allowedDirenvWarnings.add(props.warningId);
-          setState("allowed");
-          return;
-        }
-        setState("idle");
-        if (result._tag === "Success") {
-          Alert.alert("Could not allow the .envrc", result.value.error);
-        }
+      onPress={() => {
+        projectEnvironment.reviewAgain(appAtomRegistry, target);
+        status.refresh();
       }}
       className="min-h-8 justify-center px-2"
     >
-      <Text className="font-t3-medium text-xs text-foreground">
-        {state === "allowed"
-          ? "Allowed · applies to your next message"
-          : state === "pending"
-            ? "Allowing…"
-            : "Allow .envrc"}
-      </Text>
+      <Text className="font-t3-medium text-xs text-foreground">Review .envrc</Text>
     </Pressable>
   );
 }
@@ -1169,10 +1147,9 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
         <View className="shrink-0 flex-row items-center gap-px">
           {row.projectedItem.item.type === "system_notice" &&
           row.projectedItem.item.action?.type === "direnv.allow" ? (
-            <AllowDirenvButton
+            <ReviewEnvrcButton
               environmentId={props.environmentId}
               threadId={row.projectedItem.item.threadId}
-              warningId={row.projectedItem.item.id}
             />
           ) : null}
           {props.copied ? (
