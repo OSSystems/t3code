@@ -4,6 +4,7 @@ import { useGT } from "gt-react";
 import { AdvancedSettings } from "./AdvancedSettings";
 import { BranchNamingSettings } from "./BranchNamingSettings";
 import { WorktreeSubmodulesRow } from "./ProjectDefaultsSettings";
+import { ProjectEnvironmentSettings } from "./ProjectEnvironmentSettings";
 import { ScopedSwitch } from "./ScopedSwitch";
 import { useSettingsScope } from "./SettingsScopeContext";
 import {
@@ -74,6 +75,7 @@ export function WorktreesSettingsPanel() {
           <WorktreeSubmodulesRow />
         </AdvancedSettings>
       </SettingsSection>
+      <ProjectEnvironmentSettings />
       <SettingsSection id="worktree-branches" title={gt("Branches")}>
         <BranchNamingSettings />
       </SettingsSection>

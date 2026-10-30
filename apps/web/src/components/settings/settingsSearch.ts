@@ -833,15 +833,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: [msg("caffeinate sleep prevent stay awake power laptop lid inhibit")],
   },
   {
-    id: "direnv-environment",
-    title: msg("Load direnv environment"),
-    to: "/settings/general",
-    scope: "project-defaults",
-    searchTerms: [
-      msg("envrc nix flake devenv mise dev shell path tools environment variables agents"),
-    ],
-  },
-  {
     id: "background-activity",
     title: msg("Background activity"),
     to: "/settings/maintenance",
@@ -1314,6 +1305,20 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: msg("Actions"),
     to: "/settings/projects",
     searchTerms: [msg("commands scripts setup run dev server checkout worktree t3.json import")],
+  },
+  {
+    id: "project-direnv",
+    title: msg("Load direnv environment"),
+    to: "/settings/worktrees",
+    scope: "project-defaults",
+    searchTerms: [msg("direnv envrc nix flake devenv mise shell environment variables path allow")],
+  },
+  {
+    id: "project-direnv-trust",
+    title: msg("Trust .envrc changes"),
+    to: "/settings/worktrees",
+    scope: "project-defaults",
+    searchTerms: [msg("direnv envrc approve allow changes automatically")],
   },
   {
     id: "environment-icon",
