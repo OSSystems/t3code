@@ -24,6 +24,7 @@ import { useState, type ComponentProps } from "react";
 import { ThreadDetailsCard } from "./ThreadDetailsCard";
 import { OpenInPicker } from "./OpenInPicker";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
+import { ThreadDirenvControl, useThreadDirenvStatus } from "./ThreadDirenvControl";
 import { ThreadAutomationsPanel } from "./ThreadAutomationsPanel";
 import { ThreadRelationshipsPanel } from "./ThreadRelationshipsControl";
 import { ThreadRepositorySections } from "./ThreadRepositorySections";
@@ -104,6 +105,11 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
   const fileScripts = useT3ProjectFileScripts(
     props.environmentId,
     props.activeProjectScripts && visible.scripts ? props.gitCwd : null,
+  );
+  const direnvStatus = useThreadDirenvStatus(
+    props.environmentId,
+    props.projectId,
+    props.isServerThread ? props.threadId : null,
   );
   const activeThreadRef = { environmentId: props.environmentId, threadId: props.threadId };
   const project = useProject(scopeProjectRef(props.environmentId, props.projectId));
@@ -188,6 +194,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
           environment: density === "full" && visible.environment,
           openIn: density !== "essential" && visible.openIn && props.showOpenInPicker,
           scripts: visible.scripts && props.activeProjectScripts !== undefined,
+          direnv: density !== "essential" && direnvStatus.indicator !== null,
           branch: offersGit && folderIsRepo && visible.branch,
           // Without a branch selector, linked pull requests still need somewhere to show.
           pullRequests: !(offersGit && folderIsRepo) && visible.branch,
@@ -203,7 +210,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
         return (
           <>
             <div className="group/details-items">
-              {show.environment || show.openIn || show.scripts ? (
+              {show.environment || show.openIn || show.scripts || show.direnv ? (
                 <ThreadDetailsSection
                   headingId="thread-details-workspace-heading"
                   title={gt("Workspace")}
@@ -237,6 +244,8 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                         displayMode="panel"
                       />
                     ) : null}
+
+                    {show.direnv ? <ThreadDirenvControl status={direnvStatus} /> : null}
 
                     {show.scripts && props.activeProjectScripts ? (
                       <ProjectScriptsControl
