@@ -177,24 +177,29 @@ are, and cleanup covers both the default folder and the custom one.
 
 ## Project environments with direnv
 
-If a project uses [direnv](https://direnv.net), agents start with the same environment its `.envrc`
-gives your shell, such as the tools from a Nix dev shell. T3 Code only loads an `.envrc` you
-approved with `direnv allow`. A blocked or failing one shows a warning in the thread and the agent
-continues without it. For a blocked `.envrc`, **Allow .envrc** on the warning approves it without
-opening a terminal.
+If a project uses [direnv](https://direnv.net), agents and worktree setup scripts start with the
+same environment its `.envrc` gives your shell, such as the tools from a Nix dev shell. The first
+time T3 Code finds an `.envrc` in a project, the composer shows its content and asks you to
+approve it. After that, T3 Code runs `direnv allow` itself in the project and in every worktree it
+creates, so you no longer need a setup script for it. A project you already allowed with
+`direnv allow` in your shell doesn't ask.
 
-Like your shell, T3 Code checks the environment again before each message. After you allow or edit
-the `.envrc`, or update a file it watches such as `flake.lock`, your next message restarts the
-agent with the new environment and the conversation continues. direnv asks for a new allow after
-every edit to `.envrc`.
+New worktrees load the environment before the project's setup script runs, so the script sees the
+same tools. Your terminals load it through your shell's direnv hook, as usual.
 
-Cursor agents run inside T3 Code through the Cursor SDK, which has no way to pass them an
-environment, so they do not get the project's `.envrc`. OpenCode 2 runs one server for all of an
-instance's projects, so its agents do not get it either.
+When the `.envrc` changes, T3 Code asks again and shows what changed. Agents keep the environment
+they started with until you approve. To skip that question for a repository you fully control, turn
+on **Trust .envrc changes**. Like your shell, T3 Code checks the environment again before each
+message, so after an approved change, or an update to a file it watches such as `flake.lock`, your
+next message restarts the agent with the new environment and the conversation continues.
 
-direnv approves each directory separately, so a new worktree needs its own allow. Turn off **Load
-direnv environment** in **Settings → General**, for an environment or for one project, to stop
-loading it.
+A failing `.envrc` shows a warning in the thread and the agent continues without it. Cursor agents
+run inside T3 Code through the Cursor SDK, which has no way to pass them an environment, so they do
+not get the project's `.envrc`. OpenCode 2 runs one server for all of an instance's projects, so its
+agents do not get it either.
+
+Turn off **Load direnv environment** in **Settings → Worktrees**, for an environment or for one
+project, to stop loading it. **Turn off for project** on the composer's question does the same.
 
 ## Storage cleanup
 
