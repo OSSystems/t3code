@@ -46,6 +46,8 @@ import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
+import * as ProjectEnvironmentService from "../project/ProjectEnvironmentService.ts";
+import * as DirenvEnvironment from "../provider/DirenvEnvironment.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as ProviderRegistryMock from "../provider/testUtils/providerRegistryMock.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -129,6 +131,9 @@ interface HarnessOptions {
   readonly serverSettings?: Parameters<typeof ServerSettings.layerTest>[0];
   readonly providers?: ReadonlyArray<ServerProvider>;
   readonly git?: Partial<GitWorkflow.GitWorkflowService["Service"]>;
+  readonly projectEnvironment?: Layer.Layer<
+    DirenvEnvironment.DirenvEnvironment | ProjectEnvironmentService.ProjectEnvironmentService
+  >;
 }
 
 function makeHarness(options: HarnessOptions = {}) {
@@ -222,6 +227,7 @@ function makeHarness(options: HarnessOptions = {}) {
         isScratchProject: () => Effect.succeed(false),
         folderForThread: () => Effect.succeedNone,
       }),
+    options.projectEnvironment ?? Layer.empty,
   );
   const layerLaunch = ThreadLaunch.layer.pipe(
     Layer.provide(
@@ -2058,6 +2064,64 @@ it.effect("shared intake preserves durable attachment bytes after a lost launch 
     }
   }).pipe(Effect.provide(Layer.mergeAll(harness.layer, layerFiles)));
 });
+
+it.effect.each([
+  {
+    worktree: "has an .envrc",
+    load: {
+      _tag: "Loaded",
+      diff: { PATH: "/nix/store/tools/bin", STALE: null },
+      changed: true,
+    } satisfies DirenvEnvironment.DirenvLoadResult,
+    environment: { PATH: "/nix/store/tools/bin", STALE: null },
+    stages: [["environment", "done"]],
+  },
+  {
+    worktree: "has no .envrc",
+    load: { _tag: "None" } satisfies DirenvEnvironment.DirenvLoadResult,
+    environment: undefined,
+    stages: [],
+  },
+])("loads the direnv environment before setup when the worktree $worktree", (row) =>
+  Effect.gen(function* () {
+    const entered = yield* Deferred.make<ProjectSetupScriptRunner.ProjectSetupScriptRunnerInput>();
+    const harness = makeHarness({
+      runSetup: (input) => Deferred.succeed(entered, input).pipe(Effect.andThen(Effect.never)),
+      projectEnvironment: Layer.mergeAll(
+        Layer.mock(ProjectEnvironmentService.ProjectEnvironmentService)({
+          enabled: () => Effect.succeed(true),
+          prepare: () => Effect.succeed(true),
+        }),
+        Layer.mock(DirenvEnvironment.DirenvEnvironment)({ load: () => Effect.succeed(row.load) }),
+      ),
+    });
+    yield* Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const tracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
+      const launched = yield* launches.launch(
+        launchInput({
+          command: "launch:direnv-setup",
+          thread: "thread:direnv-setup",
+          message: "Start",
+          workspace: { type: "worktree", baseRef: "main" },
+        }),
+      );
+      const setup = yield* Deferred.await(entered);
+      assert.deepEqual(setup.environment, row.environment);
+      const stages = (yield* tracker.get(launched.threadId))?.stages ?? [];
+      assert.deepEqual(
+        stages.map((stage) => [stage.id, stage.status]),
+        [
+          ["fetch", "skipped"],
+          ["checkout", "done"],
+          ...row.stages,
+          ["setup-script", "running"],
+          ["agent", "pending"],
+        ],
+      );
+    }).pipe(Effect.provide(harness.layer));
+  }),
+);
 
 it.effect("cancels tracked setup before provider work is released", () =>
   Effect.gen(function* () {
