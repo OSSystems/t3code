@@ -4459,10 +4459,6 @@
   "918cd5477d0c0e9b": "전체 메시지 표시",
   "513b0929ca7dde1b": "도구 입력\n{input}",
   "c6e000ea79ae6a2b": "{status, select, inProgress {스레드 “{title}” 읽는 중} completed {스레드 “{title}” 읽음} failed {스레드 “{title}” 읽기 실패} declined {스레드 “{title}” 읽기 거부됨} stopped {스레드 “{title}” 읽기 중지됨} other {스레드 “{title}” 읽는 중}}",
-  "5b4f92a3a756615c": "Could not allow the .envrc",
-  "aa3492e231540ec4": "Allowed · applies to your next message",
-  "5a52bdeaa02b47a0": "Allowing…",
-  "fc61e2ab877a106d": "Allow .envrc",
   "93435595c79fd659": "사용량 한도에 도달했습니다. {resetTime} 후에 다시 시도하세요.",
   "5a2d803b3ea43f18": "사용량 한도에 도달했습니다.",
   "1afc4f46bc0675aa": "{label}, 도구 호출 실패",
@@ -4555,6 +4551,7 @@
       "c": "” 읽는 중"
     }
   ],
+  "7b48305ed33b0247": "Review .envrc",
   "a2aaca7ff8310186": "채팅 열기",
   "a3048aaa541b7744": "활동",
   "4a3cbccb2beedeb0": "이미지",

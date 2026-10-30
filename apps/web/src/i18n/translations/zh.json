@@ -4478,10 +4478,6 @@
   "918cd5477d0c0e9b": "显示完整消息",
   "513b0929ca7dde1b": "工具输入\n{input}",
   "c6e000ea79ae6a2b": "{status, select, inProgress {正在读取会话“{title}”} completed {已读取会话“{title}”} failed {读取会话“{title}”失败} declined {已拒绝读取会话“{title}”} stopped {已停止读取会话“{title}”} other {正在读取会话“{title}”}}",
-  "5b4f92a3a756615c": "Could not allow the .envrc",
-  "aa3492e231540ec4": "Allowed · applies to your next message",
-  "5a52bdeaa02b47a0": "Allowing…",
-  "fc61e2ab877a106d": "Allow .envrc",
   "93435595c79fd659": "已达到用量限制。请在 {resetTime} 后重试。",
   "5a2d803b3ea43f18": "已达到用量上限。",
   "1afc4f46bc0675aa": "{label}，工具调用失败",
@@ -4574,6 +4570,7 @@
       "c": "”"
     }
   ],
+  "7b48305ed33b0247": "Review .envrc",
   "a2aaca7ff8310186": "打开对话",
   "a3048aaa541b7744": "活动",
   "4a3cbccb2beedeb0": "图片",

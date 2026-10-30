@@ -530,10 +530,6 @@ export function createThreadEnvironmentAtoms<R, E>(
       onSuccess: ({ environmentId, input }, registry, result) =>
         Effect.sync(() => markMcpSignedIn(registry, environmentId, input, result.signedInAt)),
     }),
-    allowDirenv: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:commands:thread:allow-direnv",
-      tag: WS_METHODS.projectEnvironmentAllowDirenv,
-    }),
   };
   const commands = {
     ...sent,

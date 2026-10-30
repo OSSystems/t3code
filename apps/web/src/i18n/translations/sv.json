@@ -4473,10 +4473,6 @@
   "918cd5477d0c0e9b": "Visa hela meddelandet",
   "513b0929ca7dde1b": "Verktygsindata\n{input}",
   "c6e000ea79ae6a2b": "{status, select, inProgress {Läser tråden ”{title}”} completed {Läste tråden ”{title}”} failed {Kunde inte läsa tråden ”{title}”} declined {Avböjde att läsa tråden ”{title}”} stopped {Slutade läsa tråden ”{title}”} other {Läser tråden ”{title}”}}",
-  "5b4f92a3a756615c": "Could not allow the .envrc",
-  "aa3492e231540ec4": "Allowed · applies to your next message",
-  "5a52bdeaa02b47a0": "Allowing…",
-  "fc61e2ab877a106d": "Allow .envrc",
   "93435595c79fd659": "Användningsgränsen har nåtts. Försök igen efter {resetTime}.",
   "5a2d803b3ea43f18": "Användningsgränsen har nåtts.",
   "1afc4f46bc0675aa": "{label}, verktygsanropet misslyckades",
@@ -4569,6 +4565,7 @@
       "c": "”"
     }
   ],
+  "7b48305ed33b0247": "Review .envrc",
   "a2aaca7ff8310186": "Öppna chatt",
   "a3048aaa541b7744": "Aktivitet",
   "4a3cbccb2beedeb0": "bild",
