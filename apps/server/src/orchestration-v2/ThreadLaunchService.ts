@@ -47,9 +47,11 @@ import {
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import { parseGitCloneProgressLine } from "../project/gitCloneProgress.ts";
+import * as ProjectEnvironmentService from "../project/ProjectEnvironmentService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
+import * as DirenvEnvironment from "../provider/DirenvEnvironment.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
@@ -285,9 +287,49 @@ const make = Effect.gen(function* () {
     strategy.type === "root" && strategy.branch === undefined
       ? git.currentBranch(workspaceRoot).pipe(Effect.orElseSucceed(() => null))
       : Effect.succeed(strategy.branch ?? null);
+  const projectEnvironment = yield* Effect.serviceOption(
+    ProjectEnvironmentService.ProjectEnvironmentService,
+  );
+  const direnv = yield* Effect.serviceOption(DirenvEnvironment.DirenvEnvironment);
   const preparationScope = yield* Scope.make("sequential");
   const scheduledLaunches = yield* Ref.make<ReadonlySet<CommandId>>(new Set());
   yield* Effect.addFinalizer(() => Scope.close(preparationScope, Exit.void));
+
+  /**
+   * Allow and load the worktree's direnv environment before its setup script,
+   * which then runs with the same tools the agent gets. A failure is shown on
+   * the stage and setup continues without it, as the agent would.
+   */
+  const loadSetupEnvironment = Effect.fn("ThreadLaunchService.loadSetupEnvironment")(function* (
+    threadId: ThreadId,
+    projectId: ProjectId,
+    worktreePath: string,
+  ) {
+    if (Option.isNone(projectEnvironment) || Option.isNone(direnv)) return undefined;
+    yield* setupTracker.stageStatus(threadId, "environment", "running");
+    if (!(yield* projectEnvironment.value.prepare(projectId, worktreePath))) {
+      yield* setupTracker.stageStatus(threadId, "environment", "skipped", "not approved");
+      return undefined;
+    }
+    const result = yield* direnv.value.load(worktreePath);
+    switch (result._tag) {
+      case "None":
+        yield* setupTracker.update(threadId, (snapshot) => ({
+          ...snapshot,
+          stages: snapshot.stages.filter((stage) => stage.id !== "environment"),
+        }));
+        return undefined;
+      case "Failed":
+        yield* setupTracker.stage(threadId, "environment", {
+          status: "failed",
+          detail: result.message,
+        });
+        return undefined;
+      case "Loaded":
+        yield* setupTracker.stageStatus(threadId, "environment", "done");
+        return result.diff;
+    }
+  });
 
   const mapError =
     (input: PreparationInput, operation: ThreadLaunchError["operation"], threadId?: ThreadId) =>
@@ -549,12 +591,18 @@ const make = Effect.gen(function* () {
     let runReleased = false;
     // Stop background renames before forgetting worktrees; completed renames record them again.
     let branchRename: Fiber.Fiber<unknown> | null = null;
+    // The stage leaves the list after checkout when the worktree has no `.envrc`.
+    const loadsEnvironment =
+      tracked && Option.isSome(projectEnvironment) && Option.isSome(direnv)
+        ? yield* projectEnvironment.value.enabled(input.projectId)
+        : false;
+    const environmentStage: ReadonlyArray<"environment"> = loadsEnvironment ? ["environment"] : [];
     if (input.workspaceStrategy.type === "worktree") {
       yield* setupTracker.begin({
         threadId,
         branch: input.workspaceStrategy.branch ?? null,
         baseRef: input.workspaceStrategy.baseRef,
-        stages: ["fetch", "checkout", "submodules", "setup-script", "agent"],
+        stages: ["fetch", "checkout", "submodules", ...environmentStage, "setup-script", "agent"],
         fiber: yield* Effect.fiber,
       });
     } else if (reused !== undefined) {
@@ -562,7 +610,7 @@ const make = Effect.gen(function* () {
         threadId,
         branch: input.workspaceStrategy.branch ?? null,
         baseRef: reused.baseRef,
-        stages: ["setup-script", "agent"],
+        stages: [...environmentStage, "setup-script", "agent"],
         fiber: yield* Effect.fiber,
       });
     }
@@ -944,6 +992,10 @@ const make = Effect.gen(function* () {
           })
           .pipe(Effect.mapError(mapError(input, "update-thread", threadId)));
       }
+      const environment =
+        loadsEnvironment && worktreePath !== null
+          ? yield* loadSetupEnvironment(threadId, input.projectId, worktreePath)
+          : undefined;
       yield* setupTracker.stageStatus(threadId, "setup-script", "running");
       const setup =
         worktreePath === null
@@ -954,6 +1006,7 @@ const make = Effect.gen(function* () {
                 projectId: input.projectId,
                 projectCwd: project.workspaceRoot,
                 worktreePath,
+                ...(environment ? { environment } : {}),
                 ...(tracked
                   ? {
                       observeCompletion: {
