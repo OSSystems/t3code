@@ -130,6 +130,29 @@ export function acpRegistryPromptFailure(agentId: string, cause: unknown) {
   });
 }
 
+/** The agent's launch command and environment, with the project's direnv environment. */
+export const resolveAcpRegistrySpawn = Effect.fn("resolveAcpRegistrySpawn")(function* (input: {
+  readonly catalog: AcpRegistrySupport.AcpRegistryCatalog["Service"];
+  readonly settings: AcpRegistrySettings;
+  readonly cwd: string;
+  readonly environment: NodeJS.ProcessEnv;
+  readonly direnvEnvironment: AcpAdapterV2RuntimeInput["direnvEnvironment"];
+  readonly processEnvironment: NodeJS.ProcessEnv | undefined;
+}) {
+  // Before resolution, so the registry's managed bin directory lands on direnv's PATH.
+  const environment = applyDirenvEnvironment(input.environment, input.direnvEnvironment);
+  const resolved = yield* input.catalog.resolve(input.settings, input.cwd, environment);
+  if (input.processEnvironment === undefined && input.direnvEnvironment === undefined) {
+    return resolved.spawn;
+  }
+  return {
+    ...resolved.spawn,
+    // The full environment, so variables the `.envrc` unsets stay unset.
+    env: { ...environment, ...resolved.spawn.env, ...input.processEnvironment },
+    extendEnv: false,
+  };
+});
+
 function makeAcpRegistryRuntime(
   options: AcpRegistryAdapterV2Options,
   catalog: AcpRegistrySupport.AcpRegistryCatalog["Service"],
@@ -143,33 +166,26 @@ function makeAcpRegistryRuntime(
   > =>
     Effect.gen(function* () {
       const { processEnvironment, direnvEnvironment, ...runtimeInput } = input;
-      const resolved = yield* catalog
-        .resolve(options.settings, input.cwd, options.environment)
-        .pipe(
-          Effect.mapError(
-            (cause) =>
-              new EffectAcpErrors.AcpSpawnError({
-                command: options.settings.agentId || ACP_REGISTRY_PROVIDER,
-                cause,
-              }),
-          ),
-        );
+      const spawn = yield* resolveAcpRegistrySpawn({
+        catalog,
+        settings: options.settings,
+        cwd: input.cwd,
+        environment: options.environment,
+        direnvEnvironment,
+        processEnvironment,
+      }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new EffectAcpErrors.AcpSpawnError({
+              command: options.settings.agentId || ACP_REGISTRY_PROVIDER,
+              cause,
+            }),
+        ),
+      );
       const context = yield* Layer.build(
         AcpSessionRuntime.layer({
           ...runtimeInput,
-          spawn:
-            processEnvironment === undefined && direnvEnvironment === undefined
-              ? resolved.spawn
-              : {
-                  ...resolved.spawn,
-                  env: {
-                    ...applyDirenvEnvironment(
-                      resolved.spawn.env ?? options.environment,
-                      direnvEnvironment,
-                    ),
-                    ...processEnvironment,
-                  },
-                },
+          spawn,
           ...(options.settings.authMethodId ? { authMethodId: options.settings.authMethodId } : {}),
           customModels: readCustomModelEntries(options.settings.customModels).map(
             (entry) => entry.slug,
