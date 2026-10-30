@@ -37,6 +37,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
+import * as DirenvEnvironment from "@t3tools/provider-core/server/direnvEnvironment";
 import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
@@ -1664,7 +1665,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
         const epoch = ++hostEpoch;
         const mcpSession = yield* mcpSessions.read(input.threadId);
         const environment = McpProviderSession.withAgentDeviceEnvironment(
-          options.environment,
+          DirenvEnvironment.withThreadDirenvEnvironment(options.environment, input.threadId),
           mcpSession,
         );
         const launch = yield* agentScope.wrap({
