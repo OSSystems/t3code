@@ -53,6 +53,12 @@ function setup(
         if (checkouts[cwd]!.permission === "denied") checkouts[cwd]!.permission = "blocked";
         return { _tag: "Allowed" } as const;
       }),
+    load: () =>
+      Effect.succeed({
+        _tag: "Loaded",
+        diff: { PATH: "/nix/store/flake/bin", NODE_OPTIONS: null },
+        changed: true,
+      }),
   });
   const layer = ProjectEnvironmentService.layer.pipe(
     Layer.provide(
@@ -61,6 +67,8 @@ function setup(
         ServerSettings.layerTest(settings),
         Layer.mock(ProjectService.ProjectService)({
           getById: () => Effect.succeedSome({ workspaceRoot: ROOT } as never),
+          getByWorkspaceRoot: (cwd) =>
+            cwd === ROOT ? Effect.succeedSome({ id: projectId } as never) : Effect.succeedNone,
         }),
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
           getThread: () => Effect.succeed({ projectId, worktreePath: WORKTREE } as never),
@@ -220,6 +228,26 @@ describe("ProjectEnvironmentService", () => {
       });
       expect(result.approved).toBe(false);
       expect(allowed).toEqual([]);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("gives Git the approved environment of a thread's worktree or a project root", () => {
+    const { layer } = setup({
+      [ROOT]: { content: "use flake\n", permission: "blocked" },
+      [WORKTREE]: { content: "use flake\n", permission: "blocked" },
+    });
+    return Effect.gen(function* () {
+      const environment = yield* service;
+      expect(yield* environment.commandEnvironment({ cwd: ROOT })).toBeUndefined();
+
+      const sha256 = yield* sha("use flake\n");
+      yield* environment.approve({ projectId, threadId, sha256 });
+      const expected = { PATH: "/nix/store/flake/bin", NODE_OPTIONS: undefined };
+      expect(yield* environment.commandEnvironment({ cwd: WORKTREE, threadId })).toStrictEqual(
+        expected,
+      );
+      expect(yield* environment.commandEnvironment({ cwd: ROOT })).toStrictEqual(expected);
+      expect(yield* environment.commandEnvironment({ cwd: "/elsewhere" })).toBeUndefined();
     }).pipe(Effect.provide(layer));
   });
 

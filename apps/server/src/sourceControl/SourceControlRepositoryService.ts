@@ -2,6 +2,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
@@ -30,6 +31,7 @@ import {
   type GitCloneProgressLine,
 } from "../project/gitCloneProgress.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import * as ProjectEnvironmentService from "../project/ProjectEnvironmentService.ts";
 import * as SourceControlProvider from "@t3tools/source-control-core/server/SourceControlProvider";
 import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -199,6 +201,9 @@ export const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const fileSystem = yield* FileSystem.FileSystem;
   const git = yield* GitVcsDriver.GitVcsDriver;
+  const projectEnvironment = yield* Effect.serviceOption(
+    ProjectEnvironmentService.ProjectEnvironmentService,
+  );
   const path = yield* Path.Path;
   const providers = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
 
@@ -502,8 +507,11 @@ export const make = Effect.gen(function* () {
         };
       }
 
+      const env = Option.isSome(projectEnvironment)
+        ? yield* projectEnvironment.value.commandEnvironment({ cwd: input.cwd })
+        : undefined;
       const push = (pushUrl: string) =>
-        git.pushCurrentBranch(input.cwd, null, { remoteName }).pipe(
+        git.pushCurrentBranch(input.cwd, null, { remoteName, ...(env ? { env } : {}) }).pipe(
           Effect.map((result) => ({ branch: result.branch, remoteUrl: pushUrl })),
           Effect.mapError(
             (cause) =>
