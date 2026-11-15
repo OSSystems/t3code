@@ -1212,6 +1212,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["direnv envrc approve allow changes automatically"],
   },
   {
+    id: "project-direnv-dev-shell",
+    title: "Development shell",
+    to: "/settings/worktrees",
+    scope: "project-defaults",
+    searchTerms: ["direnv nix flake devshell dev shell use flake select"],
+  },
+  {
     id: "environment-icon",
     title: "Environment icon",
     to: "/settings/access",

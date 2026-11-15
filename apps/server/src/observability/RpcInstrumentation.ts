@@ -160,6 +160,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.projectsSearchEntries]: "workspace",
   [WS_METHODS.projectsWriteFile]: "workspace",
   [WS_METHODS.projectEnvironmentStatus]: "workspace",
+  [WS_METHODS.projectEnvironmentDevShells]: "workspace",
   [WS_METHODS.projectEnvironmentApprove]: "workspace",
   [WS_METHODS.projectsEnsureScratch]: "orchestration",
   [WS_METHODS.projectsCreateNew]: "orchestration",
