@@ -6234,6 +6234,7 @@ function runDirenvScenario(
             approve: () => Effect.die("unused"),
             prepare: () => Effect.succeed(true),
             enabled: () => Effect.succeed(true),
+            commandEnvironment: () => Effect.die("unused"),
           }),
         ),
       ),
