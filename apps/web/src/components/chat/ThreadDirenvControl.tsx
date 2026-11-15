@@ -55,7 +55,13 @@ export function ThreadDirenvControl(props: {
           indicator === "off" && "text-muted-foreground",
         )}
       >
-        {indicator === "on" ? "On" : indicator === "approval" ? "Needs approval" : "Off"}
+        {indicator === "on"
+          ? query.data?.devShell
+            ? `On · ${query.data.devShell}`
+            : "On"
+          : indicator === "approval"
+            ? "Needs approval"
+            : "Off"}
       </span>
     </ThreadDetailsControl>
   );

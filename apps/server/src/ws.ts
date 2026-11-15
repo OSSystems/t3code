@@ -3130,6 +3130,10 @@ export const layerWsRpc = (
                 enabled: false,
               } as const)
             : projectEnvironment.value.status(input),
+        [WS_METHODS.projectEnvironmentDevShells]: (input) =>
+          Option.isNone(projectEnvironment)
+            ? Effect.succeed({ shells: [] })
+            : projectEnvironment.value.devShells(input),
         [WS_METHODS.projectEnvironmentApprove]: (input) =>
           Option.isNone(projectEnvironment)
             ? Effect.succeed({

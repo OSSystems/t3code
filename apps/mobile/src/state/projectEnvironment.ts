@@ -18,6 +18,7 @@ export const projectEnvironment = createProjectEnvironmentAtoms(connectionAtomRu
       return JSON.stringify([
         settings?.enableDirenvEnvironment,
         settings?.trustDirenvChanges,
+        settings?.direnvDevShell,
         settings?.projectSettingsOverrides[projectId],
         run?.runId,
         run?.status,

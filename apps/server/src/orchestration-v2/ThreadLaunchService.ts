@@ -293,7 +293,11 @@ const make = Effect.gen(function* () {
       yield* setupTracker.stageStatus(threadId, "environment", "skipped", "not approved");
       return undefined;
     }
-    const result = yield* direnv.value.load(worktreePath);
+    const result = yield* direnv.value.load(
+      worktreePath,
+      undefined,
+      yield* projectEnvironment.value.loadOptions(projectId),
+    );
     switch (result._tag) {
       case "None":
         yield* setupTracker.update(threadId, (snapshot) => ({

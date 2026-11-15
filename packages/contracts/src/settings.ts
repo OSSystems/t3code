@@ -35,6 +35,7 @@ import {
   ProviderOptionSelections,
 } from "./model.ts";
 import { ModelSelection } from "./modelSelection.ts";
+import { DirenvDevShell } from "./projectEnvironment.ts";
 import { ProjectScript, type ProjectMutation } from "./project.ts";
 import { DEFAULT_RUNTIME_MODE, RuntimeMode } from "./providerPolicy.ts";
 import { BrowserProfile, BrowserProfileId, DEFAULT_BROWSER_PROFILE_ID } from "./browserProfile.ts";
@@ -1182,6 +1183,7 @@ export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "enableAgentDeviceAccess",
   "enableDirenvEnvironment",
   "trustDirenvChanges",
+  "direnvDevShell",
   "textGenerationModelSelection",
   "threadTitleInstructions",
   "sourceControlWriterModelSelection",
@@ -1222,6 +1224,7 @@ export const ProjectSettingsOverrides = Schema.Struct({
   enableAgentDeviceAccess: Schema.optionalKey(Schema.Boolean),
   enableDirenvEnvironment: Schema.optionalKey(Schema.Boolean),
   trustDirenvChanges: Schema.optionalKey(Schema.Boolean),
+  direnvDevShell: Schema.optionalKey(Schema.NullOr(DirenvDevShell)),
   textGenerationModelSelection: Schema.optionalKey(ModelSelection),
   threadTitleInstructions: Schema.optionalKey(TrimmedString),
   sourceControlWriterModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
@@ -1449,6 +1452,10 @@ export const ServerSettings = Schema.Struct({
   enableDirenvEnvironment: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   /** Approve every change to an approved project's `.envrc` without asking. */
   trustDirenvChanges: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  /** The flake dev shell `use flake` loads; null keeps the one the `.envrc` names. */
+  direnvDevShell: Schema.NullOr(DirenvDevShell).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   /** Enabling the Device panel must not grant providers device control. */
   enableDeviceSupport: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   deviceOnboardingCompleted: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
@@ -1903,6 +1910,7 @@ export const ServerSettingsPatch = Schema.Struct({
   enableAgentDeviceAccess: Schema.optionalKey(Schema.Boolean),
   enableDirenvEnvironment: Schema.optionalKey(Schema.Boolean),
   trustDirenvChanges: Schema.optionalKey(Schema.Boolean),
+  direnvDevShell: Schema.optionalKey(Schema.NullOr(DirenvDevShell)),
   enableDeviceSupport: Schema.optionalKey(Schema.Boolean),
   deviceOnboardingCompleted: Schema.optionalKey(Schema.Boolean),
   deviceHosts: Schema.optionalKey(SshDeviceHostConfigs),

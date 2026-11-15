@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off
+import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -14,9 +15,12 @@ import * as Path from "effect/Path";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import { vi } from "vite-plus/test";
 
+import * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import * as DirenvEnvironment from "./DirenvEnvironment.ts";
 
+// The fake direnv run inherits no PATH, so the wrapper script needs the host one to find bash.
+const hostPath = process.env.PATH;
 const runMock = vi.fn<ProcessRunner.ProcessRunner["Service"]["run"]>();
 
 const TestLayer = DirenvEnvironment.layer.pipe(
@@ -24,6 +28,7 @@ const TestLayer = DirenvEnvironment.layer.pipe(
     Layer.succeed(ProcessRunner.ProcessRunner, ProcessRunner.ProcessRunner.of({ run: runMock })),
   ),
   Layer.provide(Layer.succeed(HostProcess.Platform, "linux")),
+  Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3-direnv-test-" })),
   Layer.provideMerge(NodeServices.layer),
 );
 
@@ -92,6 +97,54 @@ describe("DirenvEnvironment.load", () => {
       expect(runMock).toHaveBeenCalledWith(
         expect.objectContaining({ command: "direnv", args: ["export", "json"], cwd: linked }),
       );
+    }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+  );
+
+  it.effect("loads a chosen dev shell through a wrapper config with its own profile cache", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const { nested } = yield* makeProject;
+      runMock.mockReturnValue(Effect.succeed(output({ stdout: '{"PATH":"/nix/store/ci/bin"}' })));
+      const direnv = yield* DirenvEnvironment.DirenvEnvironment;
+
+      const loaded = yield* direnv.load(nested, undefined, { devShell: "ci" });
+
+      expect(loaded).toEqual({
+        _tag: "Loaded",
+        diff: { PATH: "/nix/store/ci/bin", [DirenvEnvironment.DEV_SHELL_VARIABLE]: "ci" },
+        changed: true,
+      });
+      const env = runMock.mock.calls[0]![0].env!;
+      expect(env[DirenvEnvironment.DEV_SHELL_VARIABLE]).toBe("ci");
+
+      // The wrapper keeps the user's `use_flake` and only retargets its shell and cache.
+      const userConfig = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-direnv-user-" });
+      yield* fileSystem.makeDirectory(path.join(userConfig, "lib"));
+      yield* fileSystem.writeFileString(
+        path.join(userConfig, "lib", "nix-direnv.sh"),
+        'direnv_layout_dir() { echo "${direnv_layout_dir:-$PWD/.direnv}"; }\n' +
+          'use_flake() { echo "$* $(direnv_layout_dir)"; }\n',
+      );
+      const shell = NodeChildProcess.spawnSync(
+        "bash",
+        ["-c", `source "$DIRENV_CONFIG/direnvrc" && use_flake .#default --impure`],
+        {
+          cwd: nested,
+          encoding: "utf8",
+          env: {
+            PATH: hostPath,
+            ...env,
+            T3CODE_DIRENV_USER_CONFIG: userConfig,
+            HOME: userConfig,
+          },
+        },
+      );
+      expect(shell.stdout.trim()).toBe(`.#ci --impure ${nested}/.direnv/t3code-dev-shell-ci`);
+
+      // A diff of another shell cannot be checked for staleness; it loads afresh.
+      yield* direnv.load(nested, loaded._tag === "Loaded" ? loaded.diff : undefined, {});
+      expect(runMock.mock.calls[1]![0]).not.toHaveProperty("extendEnv");
     }).pipe(Effect.scoped, Effect.provide(TestLayer)),
   );
 
@@ -292,4 +345,23 @@ describe("applyDirenvEnvironment", () => {
       ),
     ).toEqual({ ...instanceEnv, FOO: "bar" });
   });
+});
+
+describe("DirenvEnvironment.devShells", () => {
+  it.effect("lists the shells of the flake the .envrc uses", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const { envrcPath, nested } = yield* makeProject;
+      yield* fileSystem.writeFileString(envrcPath, "dotenv\nuse flake ./nix#dev --impure\n");
+      runMock.mockReturnValueOnce(Effect.succeed(output({ stdout: '["ci","default","dev"]' })));
+      const direnv = yield* DirenvEnvironment.DirenvEnvironment;
+
+      expect(yield* direnv.devShells(nested)).toEqual(["ci", "default", "dev"]);
+      expect(runMock.mock.calls[0]![0].args).toContain("./nix#devShells");
+
+      yield* fileSystem.writeFileString(envrcPath, "use nix\n");
+      expect(yield* direnv.devShells(nested)).toEqual([]);
+      expect(runMock).toHaveBeenCalledTimes(1);
+    }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+  );
 });
