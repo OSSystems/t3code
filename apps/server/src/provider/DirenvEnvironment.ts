@@ -11,6 +11,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
+import * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
 
 export {
@@ -27,6 +28,60 @@ import {
 } from "@t3tools/provider-core/server/direnvEnvironment";
 
 export type DirenvFailureReason = "blocked" | "timeout" | "failed";
+
+export interface DirenvLoadOptions {
+  /** Load this flake dev shell where the `.envrc` runs `use flake`. */
+  readonly devShell?: string | undefined;
+}
+
+/**
+ * Set in a diff loaded with a dev shell, so a later staleness check knows which shell it holds.
+ * The provider sees it too, which tells an agent which shell it runs in.
+ */
+export const DEV_SHELL_VARIABLE = "T3CODE_DIRENV_DEV_SHELL";
+const USER_CONFIG_VARIABLE = "T3CODE_DIRENV_USER_CONFIG";
+
+/** `use flake [ref]` in an `.envrc`, with its flake reference when given. */
+const USES_FLAKE_REF = /^\s*use\s+flake(?:[ \t]+([^\s-][^\s]*))?/m;
+const DEV_SHELLS_TIMEOUT = "1 minute";
+const decodeDevShells = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Array(Schema.String)),
+);
+
+/**
+ * direnv's config directory while a dev shell is chosen. It loads the user's own configuration
+ * (nix-direnv included), then wraps `use_flake` to load the chosen shell. That shell caches its
+ * profile in its own layout directory: nix-direnv deletes the other profiles in the directory it
+ * writes, which would otherwise evict the shell the user's terminal loads, and back again.
+ */
+const DEV_SHELL_DIRENVRC = `# Written by T3 Code for the dev shell chosen in its project settings.
+_t3code_config=\${${USER_CONFIG_VARIABLE}:-}
+for _t3code_lib in "$_t3code_config/lib/"*.sh; do
+  [[ -f $_t3code_lib ]] && source "$_t3code_lib"
+done
+if [[ -f $_t3code_config/direnvrc ]]; then
+  source "$_t3code_config/direnvrc"
+elif [[ -f $HOME/.direnvrc ]]; then
+  source "$HOME/.direnvrc"
+fi
+unset _t3code_config _t3code_lib
+if [[ -n \${${DEV_SHELL_VARIABLE}:-} ]] && declare -F use_flake >/dev/null; then
+  _t3code_use_flake_definition=$(declare -f use_flake)
+  eval "_t3code_use_flake\${_t3code_use_flake_definition#use_flake}"
+  unset _t3code_use_flake_definition
+  use_flake() {
+    local flake_expr=\${1:-.}
+    if [[ $flake_expr == -* ]]; then
+      set -- . "$@"
+      flake_expr=.
+    fi
+    local layout_dir
+    layout_dir=$(direnv_layout_dir)
+    local direnv_layout_dir="$layout_dir/t3code-dev-shell-\${${DEV_SHELL_VARIABLE}}"
+    _t3code_use_flake "\${flake_expr%%#*}#\${${DEV_SHELL_VARIABLE}}" "\${@:2}"
+  }
+fi
+`;
 
 export type DirenvLoadResult =
   /** No `.envrc` governs the directory, or direnv is not installed. */
@@ -82,7 +137,13 @@ export class DirenvEnvironment extends Context.Service<
     readonly load: (
       cwd: string,
       previous?: DirenvEnvironmentDiff,
+      options?: DirenvLoadOptions,
     ) => Effect.Effect<DirenvLoadResult>;
+    /**
+     * The flake dev shells for the current system, read from the flake `use flake` loads in
+     * `cwd`'s `.envrc`; empty without one or when Nix cannot evaluate it.
+     */
+    readonly devShells: (cwd: string) => Effect.Effect<ReadonlyArray<string>>;
     /**
      * Allow `content` at `envrcPath`, as `direnv allow` would for that file. Writing direnv's
      * record for the given bytes, rather than running `direnv allow` on whatever the path
@@ -141,6 +202,25 @@ const make = Effect.fn("DirenvEnvironment.make")(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const platform = yield* HostProcess.Platform;
+  const { stateDir } = yield* ServerConfig.ServerConfig;
+  const devShellConfigDir = path.join(stateDir, "direnv-dev-shell");
+  const hostEnv = yield* HostProcess.Environment;
+  const userConfigDir =
+    hostEnv.DIRENV_CONFIG ??
+    path.join(hostEnv.XDG_CONFIG_HOME ?? path.join(hostEnv.HOME ?? "", ".config"), "direnv");
+
+  /** Writes the wrapper config each time, so a server update ships its new version. */
+  const devShellConfig = Effect.fn("DirenvEnvironment.devShellConfig")(function* () {
+    yield* fileSystem.makeDirectory(devShellConfigDir, { recursive: true });
+    yield* fileSystem.writeFileString(path.join(devShellConfigDir, "direnvrc"), DEV_SHELL_DIRENVRC);
+    // direnv reads its settings, such as `whitelist` and `load_dotenv`, from the config dir.
+    for (const name of ["direnv.toml", "config.toml"]) {
+      const link = path.join(devShellConfigDir, name);
+      yield* fileSystem.remove(link, { force: true });
+      const target = path.join(userConfigDir, name);
+      if (yield* fileSystem.exists(target)) yield* fileSystem.symlink(target, link);
+    }
+  });
 
   const findEnvrc = Effect.fn("DirenvEnvironment.findEnvrc")(function* (cwd: string) {
     // direnv walks the physical directory's ancestors, not the symlinked ones.
@@ -161,6 +241,7 @@ const make = Effect.fn("DirenvEnvironment.make")(function* () {
   const loadUncached = Effect.fn("DirenvEnvironment.load")(function* (
     cwd: string,
     previous: DirenvEnvironmentDiff | undefined,
+    devShell: string | undefined,
   ) {
     if (platform === "win32") return { _tag: "None" } as const;
     const envrcPath = yield* findEnvrc(cwd);
@@ -174,6 +255,16 @@ const make = Effect.fn("DirenvEnvironment.make")(function* () {
         reason,
         message,
       }) as const;
+    let devShellEnv: Record<string, string> = {};
+    if (devShell !== undefined) {
+      const written = yield* devShellConfig().pipe(Effect.result);
+      if (written._tag === "Failure") return failed("failed", written.failure.message);
+      devShellEnv = {
+        DIRENV_CONFIG: devShellConfigDir,
+        [USER_CONFIG_VARIABLE]: userConfigDir,
+        [DEV_SHELL_VARIABLE]: devShell,
+      };
+    }
     const result = yield* runner
       .run({
         command: "direnv",
@@ -182,8 +273,13 @@ const make = Effect.fn("DirenvEnvironment.make")(function* () {
         // direnv diffs against the environment it is given, so a staleness
         // check must see exactly what the previous load produced.
         ...(previous
-          ? { env: applyDirenvEnvironment(process.env, previous), extendEnv: false }
-          : {}),
+          ? {
+              env: { ...applyDirenvEnvironment(process.env, previous), ...devShellEnv },
+              extendEnv: false,
+            }
+          : devShell !== undefined
+            ? { env: devShellEnv }
+            : {}),
         timeout: DIRENV_TIMEOUT,
         timeoutBehavior: "timedOutResult",
       })
@@ -211,20 +307,33 @@ const make = Effect.fn("DirenvEnvironment.make")(function* () {
     }
     // `delta` is relative to the previous environment; keep the diff relative
     // to the server's own environment.
-    return { _tag: "Loaded", diff: { ...previous, ...delta.value }, changed: true } as const;
+    return {
+      _tag: "Loaded",
+      diff: {
+        ...previous,
+        ...delta.value,
+        ...(devShell === undefined ? {} : { [DEV_SHELL_VARIABLE]: devShell }),
+      },
+      changed: true,
+    } as const;
   });
 
   // Threads started together in one checkout share a single evaluation.
   const inFlight = new Map<string, Deferred.Deferred<DirenvLoadResult>>();
-  const load = (cwd: string, previous?: DirenvEnvironmentDiff) =>
+  const load = (cwd: string, previous?: DirenvEnvironmentDiff, options?: DirenvLoadOptions) =>
     Effect.suspend(() => {
+      const devShell = options?.devShell;
+      // A diff of another shell is no base for direnv's staleness check.
+      if (previous !== undefined && (previous[DEV_SHELL_VARIABLE] ?? undefined) !== devShell) {
+        previous = undefined;
+      }
       // DIRENV_DIFF identifies the environment a staleness check starts from.
-      const key = `${path.resolve(cwd)}\0${previous?.DIRENV_DIFF ?? ""}`;
+      const key = `${path.resolve(cwd)}\0${previous?.DIRENV_DIFF ?? ""}\0${devShell ?? ""}`;
       const existing = inFlight.get(key);
       if (existing) return Deferred.await(existing);
       const deferred = Deferred.makeUnsafe<DirenvLoadResult>();
       inFlight.set(key, deferred);
-      return loadUncached(cwd, previous).pipe(
+      return loadUncached(cwd, previous, devShell).pipe(
         Deferred.into(deferred),
         Effect.ensuring(Effect.sync(() => inFlight.delete(key))),
         Effect.andThen(Deferred.await(deferred)),
@@ -302,7 +411,40 @@ const make = Effect.fn("DirenvEnvironment.make")(function* () {
     });
   });
 
-  return DirenvEnvironment.of({ load, allow, inspect });
+  const devShells = Effect.fn("DirenvEnvironment.devShells")(function* (cwd: string) {
+    const envrcPath = yield* findEnvrc(cwd);
+    if (Option.isNone(envrcPath)) return [];
+    const content = yield* fileSystem
+      .readFileString(envrcPath.value)
+      .pipe(Effect.orElseSucceed(() => ""));
+    const flake = USES_FLAKE_REF.exec(content);
+    if (flake === null) return [];
+    const flakeRef = (flake[1] ?? ".").split("#")[0] || ".";
+    const result = yield* runner
+      .run({
+        command: "nix",
+        args: [
+          "--extra-experimental-features",
+          "nix-command flakes",
+          "eval",
+          "--impure",
+          "--json",
+          `${flakeRef}#devShells`,
+          "--apply",
+          "shells: builtins.attrNames (shells.${builtins.currentSystem} or { })",
+        ],
+        cwd: path.dirname(envrcPath.value),
+        timeout: DEV_SHELLS_TIMEOUT,
+        timeoutBehavior: "timedOutResult",
+      })
+      .pipe(Effect.result);
+    if (result._tag === "Failure" || result.success.timedOut || result.success.code !== 0) {
+      return [];
+    }
+    return Option.getOrElse(decodeDevShells(result.success.stdout), () => []);
+  });
+
+  return DirenvEnvironment.of({ load, allow, inspect, devShells });
 });
 
 export const layer = Layer.effect(DirenvEnvironment, make());

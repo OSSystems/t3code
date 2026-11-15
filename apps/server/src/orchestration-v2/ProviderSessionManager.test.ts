@@ -4728,6 +4728,7 @@ function runDirenvScenario(
             ]);
           }),
         allow: () => Effect.succeed({ _tag: "Allowed" }),
+        devShells: () => Effect.succeed([]),
         inspect: () => Effect.succeedNone,
       }),
     ).pipe(
@@ -4740,6 +4741,8 @@ function runDirenvScenario(
             prepare: () => Effect.succeed(true),
             enabled: () => Effect.succeed(true),
             commandEnvironment: () => Effect.die("unused"),
+            loadOptions: () => Effect.succeed({}),
+            devShells: () => Effect.die("unused"),
           }),
         ),
       ),
