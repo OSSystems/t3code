@@ -60,6 +60,7 @@ import * as SourceControlProviderRegistry from "../sourceControl/SourceControlPr
 import * as ServerConfig from "../config.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
+import * as ProjectEnvironmentService from "../project/ProjectEnvironmentService.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
@@ -602,6 +603,7 @@ function makeManager(input?: {
   textGeneration?: Partial<FakeGitTextGeneration>;
   serverSettings?: Parameters<typeof ServerSettings.layerTest>[0];
   setupScriptRunner?: ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"];
+  commandEnvironment?: ProjectEnvironmentService.ProjectEnvironmentService["Service"]["commandEnvironment"];
   gitConfigReads?: string[];
   gitCommands?: string[];
   gitSpawnGate?: {
@@ -716,6 +718,11 @@ function makeManager(input?: {
       },
     ),
     layerServerSettings,
+    input?.commandEnvironment
+      ? Layer.mock(ProjectEnvironmentService.ProjectEnvironmentService)({
+          commandEnvironment: input.commandEnvironment,
+        })
+      : Layer.empty,
   ).pipe(
     Layer.provideMerge(layerSourceControlRegistry),
     Layer.provideMerge(layerVcsDriver),
@@ -3450,6 +3457,48 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           "feature/push-dirty",
         ]).pipe(Effect.map((output) => output.stdout.trim())),
       ).toBe("Push dirty branch");
+    }),
+  );
+
+  it.effect("runs commit and push hooks with the project's direnv environment", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "HEAD:main"]);
+      yield* runGit(repoDir, ["checkout", "-b", "feature/direnv-hooks", "--track", "origin/main"]);
+      const hooksDir = (yield* runGit(repoDir, ["rev-parse", "--git-path", "hooks"])).stdout.trim();
+      for (const hook of ["pre-commit", "pre-push"]) {
+        NodeFS.writeFileSync(
+          NodePath.resolve(repoDir, hooksDir, hook),
+          `#!/bin/sh\n[ "$T3_HOOK_TOOL" = direnv ] || exit 1\necho ${hook} >> "$T3_HOOK_LOG"\n`,
+          { mode: 0o755 },
+        );
+      }
+      const hookLog = NodePath.join(yield* makeTempDir("t3code-git-hooks-"), "ran");
+      NodeFS.writeFileSync(NodePath.join(repoDir, "direnv.txt"), "direnv\n");
+
+      const requested: string[] = [];
+      const { manager } = yield* makeManager({
+        commandEnvironment: ({ cwd }) =>
+          Effect.sync(() => {
+            requested.push(cwd);
+            return { T3_HOOK_TOOL: "direnv", T3_HOOK_LOG: hookLog };
+          }),
+      });
+      const result = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "commit_push",
+        commitMessage: "Hooks need direnv",
+      });
+
+      expect(result.push.status).toBe("pushed");
+      expect(requested).toEqual([repoDir]);
+      expect(NodeFS.readFileSync(hookLog, "utf8").split("\n").filter(Boolean)).toEqual([
+        "pre-commit",
+        "pre-push",
+      ]);
     }),
   );
 

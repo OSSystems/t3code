@@ -423,8 +423,17 @@ const layerPullRequestService = PullRequestService.layer.pipe(
   Layer.provide(SourceControlRateLimit.layer),
 );
 
+const layerDirenvEnvironment = DirenvEnvironment.layer.pipe(Layer.provide(ProcessRunner.layer));
+
+const layerProjectEnvironment = ProjectEnvironmentService.layer.pipe(
+  Layer.provide(RuntimeLayer.layerProjectService),
+  Layer.provide(ProjectionStoreV2.layer),
+  Layer.provideMerge(layerDirenvEnvironment),
+);
+
 const layerGitManager = GitManager.layer.pipe(
   Layer.provide(Layer.merge(ProjectionStoreV2.layer, ProjectStore.layer)),
+  Layer.provide(layerProjectEnvironment),
   Layer.provideMerge(RuntimeLayer.layerProjectSetupScriptRunner),
   Layer.provideMerge(WorktreeSetupTracker.layer),
   Layer.provideMerge(GitVcsDriver.layer),
@@ -443,6 +452,7 @@ const layerGitWorkflow = GitWorkflowService.layer.pipe(
 );
 
 const layerSourceControlRepositoryService = SourceControlRepositoryService.layer.pipe(
+  Layer.provide(layerProjectEnvironment),
   Layer.provideMerge(GitVcsDriver.layer),
   Layer.provideMerge(layerSourceControlProviderRegistry),
 );
@@ -567,13 +577,7 @@ const layerScheduledTaskWebhookOrigin = Layer.effect(
 );
 
 const layerOrchestrationV2Runtime = RuntimeLayer.layerProduction.pipe(
-  Layer.provideMerge(
-    ProjectEnvironmentService.layer.pipe(
-      Layer.provide(RuntimeLayer.layerProjectService),
-      Layer.provide(ProjectionStoreV2.layer),
-    ),
-  ),
-  Layer.provideMerge(DirenvEnvironment.layer.pipe(Layer.provide(ProcessRunner.layer))),
+  Layer.provideMerge(layerProjectEnvironment),
   Layer.provide(layerScheduledTaskWebhookOrigin),
   Layer.provide(ProviderUsageAnalytics.layer),
   Layer.provide(layerCheckpointStore),
