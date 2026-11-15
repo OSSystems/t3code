@@ -238,6 +238,11 @@ run inside T3 Code through the Cursor SDK, which has no way to pass them an envi
 not get the project's `.envrc`. OpenCode 2 runs one server for all of an instance's projects, so its
 agents do not get it either.
 
+If the `.envrc` runs `use flake` and the flake has several dev shells, pick one for the project
+under **Development shell** in **Settings → Worktrees**. T3 Code then loads that shell instead of
+the one the `.envrc` names, without editing the file; your own terminal keeps the `.envrc`'s shell.
+Agents switch to the new shell with your next message.
+
 Turn off **Load direnv environment** in **Settings → Worktrees**, for an environment or for one
 project, to stop loading it. **Turn off for project** on the composer's question does the same.
 

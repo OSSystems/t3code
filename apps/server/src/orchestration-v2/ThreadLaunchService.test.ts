@@ -2253,6 +2253,7 @@ it.effect.each([
         Layer.mock(ProjectEnvironmentService.ProjectEnvironmentService)({
           enabled: () => Effect.succeed(true),
           prepare: () => Effect.succeed(true),
+          loadOptions: () => Effect.succeed({}),
         }),
         Layer.mock(DirenvEnvironment.DirenvEnvironment)({ load: () => Effect.succeed(row.load) }),
       ),
