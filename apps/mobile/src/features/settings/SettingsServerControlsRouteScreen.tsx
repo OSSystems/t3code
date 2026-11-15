@@ -34,6 +34,8 @@ import { SourceControlProvidersSection } from "./components/SourceControlProvide
 import { SettingsProjectOverridesSection } from "./components/SettingsProjectOverridesSection";
 import { useSettingsEnvironmentFilter } from "./settings-environment-filter";
 import { useSettingsWriter } from "./useSettingsWriter";
+import { projectEnvironment } from "../../state/projectEnvironment";
+import { useEnvironmentQuery } from "../../state/query";
 import {
   managedSettingReason,
   planMobileScopedSettingsClear,
@@ -73,6 +75,7 @@ const PAGE_PROJECT_KEYS: Record<SettingsPage, readonly ProjectScopedServerSettin
     "branchNameInstructions",
     "enableDirenvEnvironment",
     "trustDirenvChanges",
+    "direnvDevShell",
   ],
   maintenance: ["continueThreadsAfterServerUpdate"],
 };
@@ -199,6 +202,17 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
     selectedTargets,
     projectSelected ? (selectedProject?.members.map((member) => member.project) ?? []) : null,
   );
+  const devShellTarget = projectSelected
+    ? targets.find((target) => target.projectId !== null)
+    : undefined;
+  const devShellsQuery = useEnvironmentQuery(
+    devShellTarget?.projectId
+      ? projectEnvironment.devShellsAtom({
+          environmentId: devShellTarget.environment.environmentId,
+          projectId: devShellTarget.projectId,
+        })
+      : null,
+  );
   const [pendingWrites, setPendingWrites] = useState(0);
   const writeInFlight = useRef(false);
   // Closing views can save after controls disable; queue those patches behind the pending write.
@@ -221,6 +235,10 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
   const isMixed = (key: keyof ServerSettings) =>
     reference === null ||
     displayTargets.some((entry) => entry.settings[key] !== reference.settings[key]);
+  const devShell = reference?.settings.direnvDevShell ?? null;
+  const devShells = devShellsQuery.data?.shells ?? [];
+  const devShellOptions =
+    devShell !== null && !devShells.includes(devShell) ? [...devShells, devShell] : devShells;
   const writeSettings = useSettingsWriter();
   const write = (patch: ServerSettingsPatch) => {
     if (writeInFlight.current) {
@@ -514,7 +532,7 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                     icon="terminal"
                     label={gt("Load direnv environment")}
                     subtitle={gt(
-                      "Load the project's .envrc for agents and worktree setup scripts. T3 Code asks before loading each new .envrc.",
+                      "Load the project's .envrc for agents, worktree setup scripts, and Git hooks. T3 Code asks before loading each new .envrc.",
                     )}
                     value={uniform("enableDirenvEnvironment")}
                     disabled={disabledFor("enableDirenvEnvironment")}
@@ -531,6 +549,27 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                     onValueChange={(value) => write({ trustDirenvChanges: value })}
                   />
                 </SettingsSection>
+                {devShellOptions.length > 0 ? (
+                  <SettingsSection
+                    title={gt("Development shell")}
+                    footer={gt(
+                      "The flake dev shell use flake loads in T3 Code. Your own terminal keeps the shell the .envrc names.",
+                    )}
+                  >
+                    {[null, ...devShellOptions].map((shell, index) => (
+                      <SettingsChoiceRow
+                        key={shell ?? "default"}
+                        label={shell ?? gt("Default (from .envrc)")}
+                        selected={!isMixed("direnvDevShell") && devShell === shell}
+                        separated={index > 0}
+                        disabled={
+                          disabledFor("direnvDevShell") || !uniform("enableDirenvEnvironment")
+                        }
+                        onPress={() => write({ direnvDevShell: shell })}
+                      />
+                    ))}
+                  </SettingsSection>
+                ) : null}
                 <BranchNamingSettings
                   key={targetsKey}
                   mode={uniform("branchNamingMode")}

@@ -147,6 +147,7 @@ import {
   ProjectEnvironmentApproveResult,
   ProjectEnvironmentStatus,
   ProjectEnvironmentStatusInput,
+  ProjectEnvironmentDevShellsResult,
 } from "./projectEnvironment.ts";
 import {
   WorktreeSetupCancelInput,
@@ -742,6 +743,7 @@ export const WS_METHODS = {
   worktreeSetupCancel: "worktreeSetup.cancel",
   projectEnvironmentStatus: "projectEnvironment.status",
   projectEnvironmentApprove: "projectEnvironment.approve",
+  projectEnvironmentDevShells: "projectEnvironment.devShells",
   subscribeTerminalMetadata: "subscribeTerminalMetadata",
   subscribePreviewEvents: "subscribePreviewEvents",
   subscribeDiscoveredLocalServers: "subscribeDiscoveredLocalServers",
@@ -1887,6 +1889,12 @@ const WsProjectEnvironmentStatusRpc = Rpc.make(WS_METHODS.projectEnvironmentStat
   error: EnvironmentAuthorizationError,
 });
 
+const WsProjectEnvironmentDevShellsRpc = Rpc.make(WS_METHODS.projectEnvironmentDevShells, {
+  payload: ProjectEnvironmentStatusInput,
+  success: ProjectEnvironmentDevShellsResult,
+  error: EnvironmentAuthorizationError,
+});
+
 const WsProjectEnvironmentApproveRpc = Rpc.make(WS_METHODS.projectEnvironmentApprove, {
   payload: ProjectEnvironmentApproveInput,
   success: ProjectEnvironmentApproveResult,
@@ -2686,6 +2694,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsWorktreeSetupCancelRpc,
   WsProjectEnvironmentStatusRpc,
   WsProjectEnvironmentApproveRpc,
+  WsProjectEnvironmentDevShellsRpc,
   WsVcsPullRpc,
   WsVcsRefreshStatusRpc,
   WsGitRunStackedActionRpc,

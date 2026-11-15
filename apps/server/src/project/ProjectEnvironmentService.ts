@@ -4,6 +4,7 @@ import * as NodeCrypto from "node:crypto";
 import type {
   ProjectEnvironmentApproveInput,
   ProjectEnvironmentApproveResult,
+  ProjectEnvironmentDevShellsResult,
   ProjectEnvironmentStatus,
   ProjectEnvironmentStatusInput,
   ProjectId,
@@ -49,6 +50,14 @@ export class ProjectEnvironmentService extends Context.Service<
     readonly prepare: (projectId: ProjectId, cwd: string) => Effect.Effect<boolean>;
     /** The project's Load direnv environment setting. */
     readonly enabled: (projectId: ProjectId) => Effect.Effect<boolean>;
+    /** How to load the project's environment, such as its chosen dev shell. */
+    readonly loadOptions: (
+      projectId: ProjectId,
+    ) => Effect.Effect<DirenvEnvironment.DirenvLoadOptions>;
+    /** The flake dev shells the project's `.envrc` can load. */
+    readonly devShells: (
+      input: ProjectEnvironmentStatusInput,
+    ) => Effect.Effect<ProjectEnvironmentDevShellsResult>;
     /**
      * Variables for a command T3 Code runs in `cwd` itself, such as Git with its hooks, so it
      * sees the same tools as the agent. Unset variables map to `undefined`. Undefined when
@@ -215,7 +224,8 @@ const make = Effect.fn("ProjectEnvironmentService.make")(function* () {
     if (target === undefined) {
       return { envrc: null, pending: "none", approvedContent: null, enabled: false } as const;
     }
-    const enabled = (yield* settingsFor(target.projectId)).enableDirenvEnvironment;
+    const settings = yield* settingsFor(target.projectId);
+    const enabled = settings.enableDirenvEnvironment;
     const {
       envrc,
       sha256: hash,
@@ -232,6 +242,7 @@ const make = Effect.fn("ProjectEnvironmentService.make")(function* () {
       pending: !enabled || approved ? "none" : latest === undefined ? "approve" : "approve-change",
       approvedContent: latest?.content ?? null,
       enabled,
+      devShell: settings.direnvDevShell,
     } satisfies ProjectEnvironmentStatus;
   });
 
@@ -300,7 +311,7 @@ const make = Effect.fn("ProjectEnvironmentService.make")(function* () {
         Effect.orElseSucceed(() => undefined),
       ));
     if (projectId === undefined || !(yield* prepare(projectId, input.cwd))) return undefined;
-    const result = yield* direnv.load(input.cwd);
+    const result = yield* direnv.load(input.cwd, undefined, yield* loadOptions(projectId));
     if (result._tag === "Failed") {
       yield* Effect.logWarning("Running without the project's direnv environment.", {
         cwd: input.cwd,
@@ -313,7 +324,29 @@ const make = Effect.fn("ProjectEnvironmentService.make")(function* () {
     );
   });
 
-  return ProjectEnvironmentService.of({ status, approve, prepare, enabled, commandEnvironment });
+  const loadOptions: ProjectEnvironmentService["Service"]["loadOptions"] = (projectId) =>
+    settingsFor(projectId).pipe(
+      Effect.map((settings) =>
+        settings.direnvDevShell === null ? {} : { devShell: settings.direnvDevShell },
+      ),
+    );
+
+  const devShells: ProjectEnvironmentService["Service"]["devShells"] = Effect.fn(
+    "ProjectEnvironmentService.devShells",
+  )(function* (input) {
+    const target = yield* resolveTarget(input);
+    return { shells: target === undefined ? [] : yield* direnv.devShells(target.cwd) };
+  });
+
+  return ProjectEnvironmentService.of({
+    status,
+    approve,
+    prepare,
+    enabled,
+    commandEnvironment,
+    loadOptions,
+    devShells,
+  });
 });
 
 export const layer = Layer.effect(ProjectEnvironmentService, make());

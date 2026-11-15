@@ -31,12 +31,21 @@ export type ProjectEnvironmentEnvrc = typeof ProjectEnvironmentEnvrc.Type;
 export const ProjectEnvironmentPending = Schema.Literals(["none", "approve", "approve-change"]);
 export type ProjectEnvironmentPending = typeof ProjectEnvironmentPending.Type;
 
+/** A flake `devShells` attribute name, which `use flake` loads in place of the `.envrc`'s own. */
+export const DirenvDevShell = Schema.String.check(
+  Schema.isMaxLength(128),
+  Schema.isPattern(/^[A-Za-z_][A-Za-z0-9_'-]*$/),
+);
+export type DirenvDevShell = typeof DirenvDevShell.Type;
+
 export const ProjectEnvironmentStatus = Schema.Struct({
   envrc: Schema.NullOr(ProjectEnvironmentEnvrc),
   pending: ProjectEnvironmentPending,
   approvedContent: Schema.NullOr(Schema.String),
   /** False when Load direnv environment is off, or direnv is not installed. */
   enabled: Schema.Boolean,
+  /** The project's chosen dev shell; absent or null loads the one the `.envrc` names. */
+  devShell: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export type ProjectEnvironmentStatus = typeof ProjectEnvironmentStatus.Type;
 
@@ -46,6 +55,12 @@ export const ProjectEnvironmentApproveInput = Schema.Struct({
   sha256: Schema.String,
 });
 export type ProjectEnvironmentApproveInput = typeof ProjectEnvironmentApproveInput.Type;
+
+/** The flake dev shells `use flake` can load; empty when the `.envrc` does not use a flake. */
+export const ProjectEnvironmentDevShellsResult = Schema.Struct({
+  shells: Schema.Array(Schema.String),
+});
+export type ProjectEnvironmentDevShellsResult = typeof ProjectEnvironmentDevShellsResult.Type;
 
 export const ProjectEnvironmentApproveResult = Schema.Struct({
   approved: Schema.Boolean,
