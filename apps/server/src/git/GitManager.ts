@@ -80,6 +80,7 @@ import {
 } from "../textGeneration/TextGenerationPresets.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
+import * as ProjectEnvironmentService from "../project/ProjectEnvironmentService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import { extractBranchNameFromRemoteRef } from "./remoteRefs.ts";
@@ -749,6 +750,9 @@ export const make = Effect.gen(function* () {
   const serverSettingsService = yield* ServerSettings.ServerSettingsService;
   const threads = yield* ProjectionStore.ProjectionStoreV2;
   const projects = yield* ProjectStore.ProjectStoreV2;
+  const projectEnvironment = yield* Effect.serviceOption(
+    ProjectEnvironmentService.ProjectEnvironmentService,
+  );
   const projectSettingsFor = Effect.fnUntraced(function* (input: {
     readonly cwd: string;
     readonly threadId?: ThreadId | undefined;
@@ -816,8 +820,9 @@ export const make = Effect.gen(function* () {
   const pushCurrentBranch = Effect.fn("GitManager.pushCurrentBranch")(function* (
     cwd: string,
     branch: string | null,
+    env: NodeJS.ProcessEnv | undefined,
   ) {
-    const result = yield* gitCore.pushCurrentBranch(cwd, branch);
+    const result = yield* gitCore.pushCurrentBranch(cwd, branch, env ? { env } : undefined);
     if (result.status === "pushed" && result.branch) {
       yield* shareBranchBase(cwd, result.branch);
     }
@@ -2305,6 +2310,7 @@ export const make = Effect.gen(function* () {
     filePaths?: readonly string[],
     progressReporter?: GitActionProgressReporter,
     actionId?: string,
+    env?: NodeJS.ProcessEnv,
   ) {
     const emit = (event: GitActionProgressPayload) =>
       progressReporter && actionId
@@ -2392,6 +2398,7 @@ export const make = Effect.gen(function* () {
       timeoutMs: COMMIT_TIMEOUT_MS,
       stage: filePaths ? { filePaths } : {},
       ...(commitProgress ? { progress: commitProgress } : {}),
+      ...(env ? { env } : {}),
     });
     if (currentHookName !== null) {
       yield* emit({
@@ -3608,6 +3615,11 @@ export const make = Effect.gen(function* () {
 
         const currentBranch = branchStep.name ?? initialStatus.branch;
         const commitAction = isCommitAction(input.action) ? input.action : null;
+        // Commit and push hooks often call tools only the project's .envrc puts on PATH.
+        const hookEnv =
+          (commitAction || wantsPush) && Option.isSome(projectEnvironment)
+            ? yield* projectEnvironment.value.commandEnvironment(input)
+            : undefined;
         const changeRequestTerms = wantsPr ? yield* changeRequestTermsFor(input.cwd) : null;
         // A stale or missing origin/HEAD hides the default branch from status, so check here
         // before anything is committed or pushed to it.
@@ -3632,6 +3644,7 @@ export const make = Effect.gen(function* () {
                   input.filePaths,
                   options?.progressReporter,
                   progress.actionId,
+                  hookEnv,
                 ),
               ),
             )
@@ -3646,7 +3659,7 @@ export const make = Effect.gen(function* () {
               })
               .pipe(
                 Effect.tap(() => Ref.set(currentPhase, Option.some("push"))),
-                Effect.flatMap(() => pushCurrentBranch(input.cwd, currentBranch)),
+                Effect.flatMap(() => pushCurrentBranch(input.cwd, currentBranch, hookEnv)),
               )
           : { status: "skipped_not_requested" as const };
 

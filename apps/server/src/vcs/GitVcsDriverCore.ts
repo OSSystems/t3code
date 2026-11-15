@@ -3083,6 +3083,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       maxOutputBytes: REVIEW_METADATA_MAX_OUTPUT_BYTES,
       ...onlyPathspecStdin,
       ...(options?.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+      ...(options?.env !== undefined ? { env: options.env } : {}),
       ...(progress ? { progress } : {}),
     }).pipe(Effect.asVoid);
     if (partialCommitPaths) {
@@ -3250,6 +3251,10 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       });
     }
 
+    const pushOptions = {
+      timeoutMs: null,
+      ...(options?.env !== undefined ? { env: options.env } : {}),
+    };
     const requestedRemoteName = options?.remoteName?.trim() || null;
     if (requestedRemoteName) {
       const publishBranch = yield* resolvePublishBranchName(cwd, branch);
@@ -3257,7 +3262,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         "GitVcsDriver.pushCurrentBranch.pushWithRequestedRemote",
         cwd,
         ["push", "--", requestedRemoteName, `HEAD:refs/heads/${publishBranch}`],
-        { timeoutMs: null },
+        pushOptions,
       );
       return {
         status: "pushed" as const,
@@ -3370,7 +3375,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           : "GitVcsDriver.pushCurrentBranch.pushWithUpstream",
         cwd,
         ["push", "--", remoteName, `HEAD:refs/heads/${publishBranch}`],
-        { timeoutMs: null },
+        pushOptions,
       );
       return {
         status: "pushed" as const,
@@ -3385,7 +3390,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         "GitVcsDriver.pushCurrentBranch.pushUpstream",
         cwd,
         ["push", "--", destination.remoteName, `HEAD:refs/heads/${destination.branchName}`],
-        { timeoutMs: null },
+        pushOptions,
       );
       return {
         status: "pushed" as const,
@@ -3400,9 +3405,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       };
     }
 
-    yield* executeGitWithStableDiagnostics("GitVcsDriver.pushCurrentBranch.push", cwd, ["push"], {
-      timeoutMs: null,
-    });
+    yield* executeGitWithStableDiagnostics(
+      "GitVcsDriver.pushCurrentBranch.push",
+      cwd,
+      ["push"],
+      pushOptions,
+    );
     return {
       status: "pushed" as const,
       branch,

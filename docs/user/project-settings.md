@@ -219,8 +219,9 @@ repositories whose checkout settings changed.
 
 ## Project environments with direnv
 
-If a project uses [direnv](https://direnv.net), agents and worktree setup scripts start with the
-same environment its `.envrc` gives your shell, such as the tools from a Nix dev shell. The first
+If a project uses [direnv](https://direnv.net), agents, worktree setup scripts, and the Git hooks
+of commits and pushes made from T3 Code start with the same environment its `.envrc` gives your
+shell, such as the tools from a Nix dev shell. The first
 time T3 Code finds an `.envrc` in a project, the composer shows its content and asks you to
 approve it. After that, T3 Code runs `direnv allow` itself in the project and in every worktree it
 creates, so you no longer need a setup script for it. A project you already allowed with

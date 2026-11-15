@@ -7,6 +7,7 @@ import type {
   ProjectEnvironmentStatus,
   ProjectEnvironmentStatusInput,
   ProjectId,
+  ThreadId,
 } from "@t3tools/contracts";
 import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
@@ -48,6 +49,16 @@ export class ProjectEnvironmentService extends Context.Service<
     readonly prepare: (projectId: ProjectId, cwd: string) => Effect.Effect<boolean>;
     /** The project's Load direnv environment setting. */
     readonly enabled: (projectId: ProjectId) => Effect.Effect<boolean>;
+    /**
+     * Variables for a command T3 Code runs in `cwd` itself, such as Git with its hooks, so it
+     * sees the same tools as the agent. Unset variables map to `undefined`. Undefined when
+     * nothing loads.
+     */
+    readonly commandEnvironment: (input: {
+      readonly cwd: string;
+      readonly threadId?: ThreadId | undefined;
+      readonly projectId?: ProjectId | undefined;
+    }) => Effect.Effect<NodeJS.ProcessEnv | undefined>;
   }
 >()("t3/project/ProjectEnvironmentService") {}
 
@@ -271,7 +282,38 @@ const make = Effect.fn("ProjectEnvironmentService.make")(function* () {
   const enabled: ProjectEnvironmentService["Service"]["enabled"] = (projectId) =>
     settingsFor(projectId).pipe(Effect.map((settings) => settings.enableDirenvEnvironment));
 
-  return ProjectEnvironmentService.of({ status, approve, prepare, enabled });
+  const commandEnvironment: ProjectEnvironmentService["Service"]["commandEnvironment"] = Effect.fn(
+    "ProjectEnvironmentService.commandEnvironment",
+  )(function* (input) {
+    const threadProjectId =
+      input.threadId === undefined
+        ? undefined
+        : yield* projectionStore.getThread(input.threadId).pipe(
+            Effect.map((thread) => thread.projectId),
+            Effect.orElseSucceed(() => undefined),
+          );
+    const projectId =
+      threadProjectId ??
+      input.projectId ??
+      (yield* projects.getByWorkspaceRoot(input.cwd).pipe(
+        Effect.map((project) => Option.getOrUndefined(project)?.id),
+        Effect.orElseSucceed(() => undefined),
+      ));
+    if (projectId === undefined || !(yield* prepare(projectId, input.cwd))) return undefined;
+    const result = yield* direnv.load(input.cwd);
+    if (result._tag === "Failed") {
+      yield* Effect.logWarning("Running without the project's direnv environment.", {
+        cwd: input.cwd,
+        message: result.message,
+      });
+    }
+    if (result._tag !== "Loaded") return undefined;
+    return Object.fromEntries(
+      Object.entries(result.diff).map(([name, value]) => [name, value ?? undefined]),
+    );
+  });
+
+  return ProjectEnvironmentService.of({ status, approve, prepare, enabled, commandEnvironment });
 });
 
 export const layer = Layer.effect(ProjectEnvironmentService, make());
