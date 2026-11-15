@@ -173,6 +173,8 @@ export interface GitCommitOptions {
   readonly timeoutMs?: number;
   readonly progress?: GitCommitProgress;
   readonly stage?: { readonly filePaths?: readonly string[] };
+  /** Extra variables for `git commit`, which its hooks inherit. */
+  readonly env?: NodeJS.ProcessEnv;
 }
 
 export interface GitDeleteLocalBranchInput {
@@ -355,7 +357,11 @@ export class GitVcsDriver extends Context.Service<
     readonly pushCurrentBranch: (
       cwd: string,
       fallbackBranch: string | null,
-      options?: { readonly remoteName?: string | null },
+      options?: {
+        readonly remoteName?: string | null;
+        /** Extra variables for `git push`, which its hooks inherit. */
+        readonly env?: NodeJS.ProcessEnv;
+      },
     ) => Effect.Effect<GitPushResult, GitCommandError>;
     /** Where `pushCurrentBranch` would push the checked-out branch; null with no remote or when Git picks. */
     readonly resolvePushTarget: (

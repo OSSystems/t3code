@@ -456,9 +456,18 @@ const layerIssueService = Layer.merge(IssueService.layer, IssueTrackerConnection
 // One instance serves MCP link calls and refreshes snapshots on thread events.
 const layerThreadIssueService = ThreadIssueService.layer;
 
+const layerDirenvEnvironment = DirenvEnvironment.layer.pipe(Layer.provide(ProcessRunner.layer));
+
+const layerProjectEnvironment = ProjectEnvironmentService.layer.pipe(
+  Layer.provide(RuntimeLayer.layerProjectService),
+  Layer.provide(ProjectionStoreV2.layer),
+  Layer.provideMerge(layerDirenvEnvironment),
+);
+
 const layerGitManager = GitManager.layer.pipe(
   Layer.provide(Layer.merge(ProjectionStoreV2.layer, ProjectStore.layer)),
   Layer.provide(layerPullRequestService.pipe(Layer.provide(RuntimeLayer.layerProjectService))),
+  Layer.provide(layerProjectEnvironment),
   Layer.provideMerge(RuntimeLayer.layerProjectSetupScriptRunner),
   Layer.provideMerge(WorktreeSetupTracker.layer),
   Layer.provideMerge(GitVcsDriver.layer),
@@ -477,6 +486,7 @@ const layerGitWorkflow = GitWorkflowService.layer.pipe(
 );
 
 const layerSourceControlRepositoryService = SourceControlRepositoryService.layer.pipe(
+  Layer.provide(layerProjectEnvironment),
   Layer.provideMerge(GitVcsDriver.layer),
   Layer.provideMerge(layerSourceControlProviderRegistry),
 );
@@ -614,13 +624,7 @@ const layerScheduledTaskWebhookOrigin = Layer.effect(
 );
 
 const layerOrchestrationV2Runtime = RuntimeLayer.layerProduction.pipe(
-  Layer.provideMerge(
-    ProjectEnvironmentService.layer.pipe(
-      Layer.provide(RuntimeLayer.layerProjectService),
-      Layer.provide(ProjectionStoreV2.layer),
-    ),
-  ),
-  Layer.provideMerge(DirenvEnvironment.layer.pipe(Layer.provide(ProcessRunner.layer))),
+  Layer.provideMerge(layerProjectEnvironment),
   Layer.provide(UsageLimitSources.layerResetFallback),
   Layer.provide(layerScheduledTaskWebhookOrigin),
   Layer.provide(ProviderUsageAnalytics.layer),
