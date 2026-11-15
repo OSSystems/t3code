@@ -532,17 +532,19 @@ export const layerWithOptions = (
       const projectEnvironment = yield* Effect.serviceOption(
         ProjectEnvironmentService.ProjectEnvironmentService,
       );
-      const direnvEnabled = Effect.fn("ProviderSessionManagerV2.direnvEnabled")(
+      /** How to load the thread's direnv environment, or null when it must not load. */
+      const direnvLoadOptions = Effect.fn("ProviderSessionManagerV2.direnvLoadOptions")(
         function* (threadId: ThreadId, cwd: string) {
-          if (Option.isNone(projectEnvironment)) return false;
+          if (Option.isNone(projectEnvironment)) return null;
           const thread = yield* projectionStore.getThread(threadId);
-          return yield* projectEnvironment.value.prepare(thread.projectId, cwd);
+          if (!(yield* projectEnvironment.value.prepare(thread.projectId, cwd))) return null;
+          return yield* projectEnvironment.value.loadOptions(thread.projectId);
         },
         Effect.catch((cause) =>
           Effect.logWarning(
             "Could not resolve the project's direnv environment; starting the provider without it.",
             { cause },
-          ).pipe(Effect.as(false)),
+          ).pipe(Effect.as(null)),
         ),
       );
       /** The failure each thread was last told about, so restarts do not repeat it. */
@@ -576,8 +578,10 @@ export const layerWithOptions = (
         DirenvEnvironment.setThreadDirenvEnvironment(threadId, preloaded);
         if (cwd === null) return null;
         if (preloaded !== undefined) return { cwd, diff: preloaded } as SessionDirenvEnvironment;
-        if (Option.isNone(direnv) || !(yield* direnvEnabled(threadId, cwd))) return null;
-        const result = yield* direnv.value.load(cwd);
+        if (Option.isNone(direnv)) return null;
+        const options = yield* direnvLoadOptions(threadId, cwd);
+        if (options === null) return null;
+        const result = yield* direnv.value.load(cwd, undefined, options);
         yield* Effect.annotateCurrentSpan({ "provider.direnv.result": result._tag });
         recordDirenvResult(threadId, result);
         const diff = result._tag === "Loaded" ? result.diff : undefined;
@@ -593,10 +597,11 @@ export const layerWithOptions = (
         function* (entry: LiveSessionEntry, threadId: ThreadId, cwd: string | null) {
           const loaded = entry.direnv?.diff;
           if (Option.isNone(direnv) || cwd === null) return { restart: false } as const;
-          if (!(yield* direnvEnabled(threadId, cwd)))
-            return { restart: loaded !== undefined } as const;
+          const options = yield* direnvLoadOptions(threadId, cwd);
+          if (options === null) return { restart: loaded !== undefined } as const;
           const previous = entry.direnv?.cwd === cwd ? loaded : undefined;
-          const result = yield* direnv.value.load(cwd, previous);
+          // A diff of another dev shell loads afresh and restarts the session.
+          const result = yield* direnv.value.load(cwd, previous, options);
           yield* Effect.annotateCurrentSpan({ "provider.direnv.refresh": result._tag });
           recordDirenvResult(threadId, result);
           switch (result._tag) {

@@ -49,6 +49,10 @@ export function createProjectEnvironmentAtoms<R, E>(
             }),
         }),
   });
+  const devShells = createEnvironmentRpcQueryAtomFamily(runtime, {
+    label: "environment-data:project-environment:dev-shells",
+    tag: WS_METHODS.projectEnvironmentDevShells,
+  });
   // "Not now" lasts for the session, per reviewed content, until a thread asks for a review.
   const dismissedAtom = Atom.make<{ readonly dismissed: ReadonlySet<string> }>({
     dismissed: new Set<string>(),
@@ -62,6 +66,9 @@ export function createProjectEnvironmentAtoms<R, E>(
           ...(target.threadId === null ? {} : { threadId: target.threadId }),
         },
       }),
+    /** The flake dev shells the project's `.envrc` can load, read from its own checkout. */
+    devShellsAtom: (target: Omit<ProjectEnvironmentTarget, "threadId">) =>
+      devShells({ environmentId: target.environmentId, input: { projectId: target.projectId } }),
     approve: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:project-environment:approve",
       tag: WS_METHODS.projectEnvironmentApprove,

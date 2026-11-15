@@ -58,7 +58,9 @@ export function ThreadDirenvControl(props: {
         )}
       >
         {indicator === "on"
-          ? gt("On", { $context: "direnv environment status" })
+          ? query.data?.devShell
+            ? gt("On · {devShell}", { devShell: query.data.devShell })
+            : gt("On", { $context: "direnv environment status" })
           : indicator === "approval"
             ? gt("Needs approval")
             : gt("Off", { $context: "direnv environment status" })}
