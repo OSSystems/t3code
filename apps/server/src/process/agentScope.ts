@@ -36,6 +36,13 @@ export function ownedAgentSlice(stateDir: string): string {
 const GiB = 1024 ** 3;
 
 /**
+ * `host-managed` leaves the agents slice's memory to whoever runs the machine: a VM sized by its
+ * host, which grows on demand from a small boot size, or an administrator's own drop-in, which a
+ * runtime override would outrank. Limits from the RAM of the moment would cap agents far below it.
+ */
+const AGENT_MEMORY_POLICY_ENV = "T3CODE_AGENT_SLICE_MEMORY_POLICY";
+
+/**
  * Agents leave about 6 GB free before throttling and 4 GB before an OOM kill (at
  * least half and three quarters of RAM go to agents) so the server and sshd keep
  * working. Without swap, MemoryHigh stalls every agent and never reaches the kill.
@@ -208,11 +215,24 @@ export const make = Effect.gen(function* () {
         Effect.map((text) => /^SwapTotal:\s*0 kB$/m.exec(text) === null),
         Effect.orElseSucceed(() => true),
       );
+      const memoryPolicy = hostEnvironment[AGENT_MEMORY_POLICY_ENV];
+      if (
+        memoryPolicy !== undefined &&
+        memoryPolicy !== "automatic" &&
+        memoryPolicy !== "host-managed"
+      ) {
+        yield* Effect.logWarning("Unknown agent slice memory policy; using automatic limits", {
+          env: AGENT_MEMORY_POLICY_ENV,
+          memoryPolicy,
+        });
+      }
+      const hostManagedMemory = memoryPolicy === "host-managed";
       let appliedTotal: number | undefined;
       let appliedHasSwap: boolean | undefined;
       const memoryLimitsLock = yield* Semaphore.make(1);
       const applyMemoryLimits = memoryLimitsLock.withPermits(1)(
         Effect.gen(function* () {
+          if (hostManagedMemory) return;
           const total = NodeOS.totalmem();
           const hasSwap = yield* readHasSwap;
           if (total === appliedTotal && hasSwap === appliedHasSwap) return;
@@ -238,7 +258,8 @@ export const make = Effect.gen(function* () {
       yield* setProperties(AGENTS_PARENT_SLICE, AGENTS_PARENT_PROPERTIES);
       yield* Effect.logInfo("Agent scopes are on", {
         slice: AGENT_SLICE,
-        ...agentSliceMemoryLimits(NodeOS.totalmem(), yield* readHasSwap),
+        memoryPolicy: hostManagedMemory ? "host-managed" : "automatic",
+        ...(hostManagedMemory ? {} : agentSliceMemoryLimits(NodeOS.totalmem(), yield* readHasSwap)),
         oomPolicy: supportsOomPolicy,
       });
       return {

@@ -120,6 +120,23 @@ protection takes effect at once. The server's protection from the kernel's
 out-of-memory killer takes effect after `t3 service restart`. `t3 service status` reports whether
 the protection is in place, and `t3 service protect --undo` removes it.
 
+## Let the host set the agents' memory
+
+On Linux, T3 Code caps its agents' memory at a share of the RAM the machine has
+when an agent starts. Where something else sizes that memory, set
+`T3CODE_AGENT_SLICE_MEMORY_POLICY=host-managed` in the server's environment and
+T3 Code leaves `app-t3code-agents.slice` as it finds it:
+
+- a VM whose host plugs memory as it runs short, which starts small: a cap from
+  its RAM at boot would stop agents long before the VM's own limit;
+- an administrator's drop-in for the slice, which a T3 Code limit would
+  otherwise replace.
+
+Agents still run in their own scopes, with lower priority than the server, and
+a scope the kernel kills for memory is still reported. Limits T3 Code set
+before stay until the user manager restarts or the machine reboots. Unset, or
+`automatic`, keeps the caps.
+
 ## Troubleshooting
 
 Start with `t3 service status` on the host. It prints the log path and, on Linux,

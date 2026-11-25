@@ -68,11 +68,13 @@ const withFakeSystemd = <A, E>(
     stopFails = false,
     leftovers = false,
     liveOwner = false,
+    environment = {},
   }: {
     readonly oomPolicy?: boolean;
     readonly stopFails?: boolean;
     readonly leftovers?: boolean;
     readonly liveOwner?: boolean;
+    readonly environment?: Record<string, string>;
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -130,7 +132,11 @@ const withFakeSystemd = <A, E>(
       Effect.provideService(ProviderProcesses.ProviderProcesses, { hasOtherLiveOwner: liveOwner }),
       Effect.provideService(ProcessRunner.ProcessRunner, runner),
       Effect.provideService(HostProcess.Platform, "linux"),
-      Effect.provideService(HostProcess.Environment, { PATH: bin, XDG_RUNTIME_DIR: "/run/user/1" }),
+      Effect.provideService(HostProcess.Environment, {
+        ...environment,
+        PATH: bin,
+        XDG_RUNTIME_DIR: "/run/user/1",
+      }),
       Effect.provideService(FileSystem.FileSystem, {
         ...fileSystem,
         readFileString: (path, encoding) =>
@@ -371,6 +377,24 @@ describe("AgentScope service", () => {
       }),
     ),
   );
+
+  it.effect("leaves agent memory to the host when it manages it", () => {
+    memory.total = 2 * GiB;
+    return withFakeSystemd(
+      ({ scope, calls }) =>
+        Effect.gen(function* () {
+          const launch = scope.wrap({ command: "agent", args: [], name: "t", threadId: "a" });
+          yield* launch;
+          // A VM's host plugs more memory as its agents need it.
+          memory.total = 16 * GiB;
+          const agent = yield* launch;
+          const sliced = calls.filter(([, verb]) => verb === "set-property").map((args) => args[3]);
+          expect(sliced).toEqual(["app-t3code.slice"]);
+          expect(agent.args).toContain("--property=OOMPolicy=stop");
+        }),
+      { environment: { T3CODE_AGENT_SLICE_MEMORY_POLICY: "host-managed" } },
+    );
+  });
 
   it.effect("follows a live memory or swap change at the next launch", () => {
     memory.total = 16 * GiB;
