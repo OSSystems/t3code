@@ -185,7 +185,7 @@ const emptyRecording = (): RecordedRegistration => ({
 
 describe("DesktopLinuxUrlHandler", () => {
   it("renders a scheme-handler desktop entry with freedesktop Exec quoting", () => {
-    const entry = DesktopLinuxUrlHandler.renderUrlHandlerDesktopEntry({
+    const entry = DesktopLinuxUrlHandler.renderHiddenDesktopEntry({
       displayName: "T3 Code (Nightly)",
       execTarget: '/home/al ice/Apps/T3 "100%" $HOME\\x.AppImage',
       scheme: "t3code",
@@ -218,7 +218,7 @@ describe("DesktopLinuxUrlHandler", () => {
   ])("finds the launch path an update from $from to $to removed", ({ from, to, restored }) => {
     for (const dir of ["/home/alice/Applications", '/home/al ice/My "100%" $Apps\\x']) {
       const previous = dir + "/" + from;
-      const previousEntry = DesktopLinuxUrlHandler.renderUrlHandlerDesktopEntry({
+      const previousEntry = DesktopLinuxUrlHandler.renderHiddenDesktopEntry({
         displayName: "T3 Code (Beta)",
         execTarget: previous,
         scheme: "t3code",
@@ -245,7 +245,7 @@ describe("DesktopLinuxUrlHandler", () => {
         assert.equal(recorded.files.length, 1);
         assert.equal(
           recorded.files[0]?.path,
-          "/home/alice/.local/share/applications/com.t3tools.T3Code.desktop",
+          "/home/alice/.local/share/applications/com.t3tools.T3Code.UrlHandler.desktop",
         );
         assert.include(
           recorded.files[0]?.content,
@@ -259,7 +259,7 @@ describe("DesktopLinuxUrlHandler", () => {
           },
           {
             command: "xdg-mime",
-            args: ["default", "com.t3tools.T3Code.desktop", "x-scheme-handler/t3code"],
+            args: ["default", "com.t3tools.T3Code.UrlHandler.desktop", "x-scheme-handler/t3code"],
           },
         ]);
       });
@@ -274,7 +274,7 @@ describe("DesktopLinuxUrlHandler", () => {
 
       assert.include(
         recorded.files[0]?.content,
-        DesktopLinuxUrlHandler.renderUrlHandlerDesktopEntry({
+        DesktopLinuxUrlHandler.renderHiddenDesktopEntry({
           displayName: "T3 Code (Alpha)",
           execTarget: process.execPath,
           scheme: "t3code",
@@ -296,12 +296,12 @@ describe("DesktopLinuxUrlHandler", () => {
     });
   });
 
-  it.effect("does not rewrite the pre-ready entry while the portal can be reading it", () => {
+  it.effect("does not rewrite a current handler entry", () => {
     const recorded = emptyRecording();
 
     return Effect.gen(function* () {
       yield* runRegister(recorded, {
-        existingEntry: DesktopLinuxUrlHandler.renderUrlHandlerDesktopEntry({
+        existingEntry: DesktopLinuxUrlHandler.renderHiddenDesktopEntry({
           displayName: "T3 Code (Alpha)",
           execTarget: "/home/alice/Applications/T3-Code.AppImage",
           scheme: "t3code",
@@ -318,7 +318,7 @@ describe("DesktopLinuxUrlHandler", () => {
         },
         {
           command: "xdg-mime",
-          args: ["default", "com.t3tools.T3Code.desktop", "x-scheme-handler/t3code"],
+          args: ["default", "com.t3tools.T3Code.UrlHandler.desktop", "x-scheme-handler/t3code"],
         },
       ]);
     });
@@ -330,7 +330,7 @@ describe("DesktopLinuxUrlHandler", () => {
     return Effect.gen(function* () {
       yield* runRegister(recorded, {
         iconSource: "/tmp/.mount_T3/resources/icon.png",
-        existingEntry: DesktopLinuxUrlHandler.renderUrlHandlerDesktopEntry({
+        existingEntry: DesktopLinuxUrlHandler.renderHiddenDesktopEntry({
           displayName: "T3 Code (Alpha)",
           execTarget: "/home/alice/Applications/T3-Code.AppImage",
           scheme: "t3code",
@@ -364,7 +364,7 @@ describe("DesktopLinuxUrlHandler", () => {
     });
   });
 
-  it.effect("writes the portal identity without claiming the URL scheme in development", () => {
+  it.effect("skips registering the default handler in development", () => {
     const nonLinux = emptyRecording();
     const unpackaged = emptyRecording();
 
@@ -373,6 +373,7 @@ describe("DesktopLinuxUrlHandler", () => {
       yield* runRegister(unpackaged, {
         environment: {
           isPackaged: false,
+          isDevelopment: true,
           linuxDesktopEntryName: "com.t3tools.T3Code.Development.desktop",
         },
       });
@@ -380,8 +381,9 @@ describe("DesktopLinuxUrlHandler", () => {
       assert.deepEqual(nonLinux.files, []);
       assert.equal(
         unpackaged.files[0]?.path,
-        "/home/alice/.local/share/applications/com.t3tools.T3Code.Development.desktop",
+        "/home/alice/.local/share/applications/com.t3tools.T3Code.Development.UrlHandler.desktop",
       );
+      assert.include(unpackaged.files[0]?.content, "MimeType=x-scheme-handler/t3code-dev;");
       assert.deepEqual(unpackaged.commands, []);
     });
   });
@@ -400,7 +402,8 @@ describe("DesktopLinuxUrlHandler", () => {
           module: "FileSystem",
           method: "writeFileString",
           description: "read-only filesystem",
-          pathOrDescriptor: "/home/alice/.local/share/applications/com.t3tools.T3Code.desktop",
+          pathOrDescriptor:
+            "/home/alice/.local/share/applications/com.t3tools.T3Code.UrlHandler.desktop",
         }),
       });
 

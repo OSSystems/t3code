@@ -74,12 +74,12 @@ const escapeUrlHandlerExecTarget = (value: string): string =>
     ? escapeDesktopEntryExecArgument(value)
     : escapeDesktopEntryString(value.replaceAll("%", "%%"));
 
-// The AppImage integration entry owns the window identity. This
-// hidden URL-only entry must not compete with it for StartupWMClass matching.
-export function renderUrlHandlerDesktopEntry(input: {
+// Hidden from menus. Only the URL handler entry declares the scheme, so the app-id entry
+// never adds a second handler to the portal's choice.
+export function renderHiddenDesktopEntry(input: {
   readonly displayName: string;
   readonly execTarget: string;
-  readonly scheme: string;
+  readonly scheme?: string;
   readonly iconPath?: string;
 }): string {
   return [
@@ -91,7 +91,7 @@ export function renderUrlHandlerDesktopEntry(input: {
     "Terminal=false",
     "NoDisplay=true",
     "StartupNotify=false",
-    `MimeType=x-scheme-handler/${input.scheme};`,
+    ...(input.scheme === undefined ? [] : [`MimeType=x-scheme-handler/${input.scheme};`]),
     "",
   ].join("\n");
 }
@@ -107,6 +107,9 @@ function parseUrlHandlerExecTarget(entry: string): string | null {
     quoted === undefined ? unescaped : quoted.replace(/\\([\\`$"])/gu, (_, char: string) => char)
   ).replaceAll("%%", "%");
 }
+
+const resolveLinuxUrlHandlerEntryName = (desktopEntryName: string): string =>
+  desktopEntryName.replace(/\.desktop$/u, ".UrlHandler.desktop");
 
 const APPIMAGE_NAME_VERSION = /\d+\.\d+\.\d+/u;
 
@@ -154,9 +157,10 @@ export const make = Effect.gen(function* () {
   const assets = yield* DesktopAssets.DesktopAssets;
 
   const scheme = ElectronProtocol.getDesktopScheme(environment.isDevelopment);
+  const urlHandlerEntryName = resolveLinuxUrlHandlerEntryName(environment.linuxDesktopEntryName);
   const desktopEntryPath = environment.path.join(
     environment.linuxApplicationsDir,
-    environment.linuxDesktopEntryName,
+    urlHandlerEntryName,
   );
   const iconsDir = environment.path.join(environment.linuxApplicationsDir, "..", "icons");
   const iconPath = environment.path.join(iconsDir, `${environment.linuxDesktopEntryName}.png`);
@@ -172,13 +176,12 @@ export const make = Effect.gen(function* () {
       Option.orElse(() => environment.appImagePath),
       Option.getOrElse(() => process.execPath),
     );
-    const content = renderUrlHandlerDesktopEntry({
+    const content = renderHiddenDesktopEntry({
       displayName: environment.displayName,
       execTarget,
       scheme,
       ...(environment.isPackaged ? { iconPath } : {}),
     });
-    // Avoid truncating the pre-ready entry while the portal may be reading it.
     const existing = yield* fileSystem
       .readFileString(desktopEntryPath)
       .pipe(Effect.orElseSucceed(() => null));
@@ -288,7 +291,7 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const command = ChildProcess.make(
         "xdg-mime",
-        ["default", environment.linuxDesktopEntryName, `x-scheme-handler/${scheme}`],
+        ["default", urlHandlerEntryName, `x-scheme-handler/${scheme}`],
         {
           stdin: "ignore",
           stdout: "ignore",

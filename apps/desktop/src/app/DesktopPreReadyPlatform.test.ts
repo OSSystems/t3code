@@ -17,6 +17,9 @@ const {
   execFileSyncMock,
   readFileSyncMock,
   symlinkSyncMock,
+  existsSyncMock,
+  rmSyncMock,
+  symlinkPaths,
 } = vi.hoisted(() => ({
   appendSwitchMock: vi.fn(),
   getSwitchValueMock: vi.fn(),
@@ -29,6 +32,9 @@ const {
   execFileSyncMock: vi.fn(),
   readFileSyncMock: vi.fn(),
   symlinkSyncMock: vi.fn(),
+  existsSyncMock: vi.fn(),
+  rmSyncMock: vi.fn(),
+  symlinkPaths: new Set<string>(),
 }));
 
 vi.mock("electron", () => ({
@@ -54,6 +60,14 @@ vi.mock("node:fs", () => ({
   writeFileSync: writeFileSyncMock,
   copyFileSync: copyFileSyncMock,
   symlinkSync: symlinkSyncMock,
+  existsSync: existsSyncMock,
+  rmSync: rmSyncMock,
+  lstatSync: (path: string) =>
+    existsSyncMock(path) ? { isFile: () => !symlinkPaths.has(path) } : undefined,
+  realpathSync: (path: string) =>
+    path === "/opt/share/applications/com.t3tools.T3Code.desktop"
+      ? "/xdg/applications/com.t3tools.T3Code.desktop"
+      : path.replace("/xdg-alias/", "/xdg/"),
 }));
 
 vi.mock("node:child_process", () => ({
@@ -76,6 +90,9 @@ describe("DesktopPreReadyPlatform", () => {
     execFileSyncMock.mockReset();
     readFileSyncMock.mockReset().mockReturnValue("{}");
     symlinkSyncMock.mockReset();
+    existsSyncMock.mockReset().mockReturnValue(false);
+    rmSyncMock.mockReset();
+    symlinkPaths.clear();
   });
 
   it.effect("persists Linux scaling synchronously across relaunches and settings rewrites", () => {
@@ -170,7 +187,7 @@ describe("DesktopPreReadyPlatform", () => {
         assert.equal(identity.desktopName, "com.t3tools.T3Code.desktop");
         assert.include(identity.desktopEntry ?? "", "Exec=/Applications/current.AppImage %U");
         assert.include(identity.desktopEntry ?? "", "Name=T3 Code (Beta)");
-        assert.include(identity.desktopEntry ?? "", "MimeType=x-scheme-handler/t3code;");
+        assert.notInclude(identity.desktopEntry ?? "", "MimeType=");
         assert.include(
           identity.desktopEntry ?? "",
           "Icon=/xdg/icons/com.t3tools.T3Code.desktop.png",
@@ -248,6 +265,120 @@ describe("DesktopPreReadyPlatform", () => {
           ([path]) => path === "/xdg/applications/com.t3tools.T3Code.desktop",
         )?.[1];
         assert.include(entry, 'Exec="/opt/T3 Code/t3code" %U');
+      }),
+    ).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
+  });
+
+  it.effect.each([
+    {
+      label: "removes a generated entry that hides an installed launcher",
+      entry: "NoDisplay=true\nMimeType=x-scheme-handler/t3code;\n",
+      dataDirs: "relative/share:/xdg:/nix/profile/share",
+      kept: false,
+    },
+    {
+      label: "keeps a visible entry next to an installed launcher",
+      entry: "[Desktop Entry]\nExec=t3code --custom %U\n",
+      dataDirs: "relative/share:/xdg:/nix/profile/share",
+      kept: true,
+    },
+    {
+      label: "keeps a hidden symlink next to an installed launcher",
+      entry: "NoDisplay=true\n",
+      dataDirs: "/nix/profile/share",
+      kept: true,
+      symlink: true,
+    },
+    {
+      label: "keeps the entry when $XDG_DATA_DIRS reaches $XDG_DATA_HOME through a symlink",
+      entry: "NoDisplay=true\n",
+      dataDirs: "/xdg-alias",
+      kept: true,
+      rewritten: true,
+    },
+    {
+      label: "keeps the entry when an installed path is a symlink to it",
+      entry: "NoDisplay=true\n",
+      dataDirs: "/opt/share",
+      kept: true,
+      rewritten: true,
+    },
+    {
+      label: "keeps a visible launcher in $XDG_DATA_HOME",
+      entry: "[Desktop Entry]\nExec=t3code --custom %U\n",
+      dataDirs: "/xdg",
+      kept: true,
+    },
+    {
+      label: "writes nothing next to an installed launcher",
+      entry: undefined,
+      dataDirs: "/nix/profile/share",
+      kept: false,
+    },
+  ])("$label", ({ entry, dataDirs, kept, rewritten = false, symlink = false }) => {
+    vi.stubEnv("VITE_DEV_SERVER_URL", "");
+    getSwitchValueMock.mockReturnValue("");
+    const entryPath = "/xdg/applications/com.t3tools.T3Code.desktop";
+    const files = new Map([
+      ["/nix/profile/share/applications/com.t3tools.T3Code.desktop", "[Desktop Entry]\n"],
+      ["/opt/share/applications/com.t3tools.T3Code.desktop", ""],
+    ]);
+    if (entry !== undefined) files.set(entryPath, entry);
+    if (symlink) symlinkPaths.add(entryPath);
+    existsSyncMock.mockImplementation((path: string) =>
+      files.has(path.replace("/xdg-alias/", "/xdg/")),
+    );
+    readFileSyncMock.mockImplementation((path: string) => files.get(path) ?? "{}");
+    rmSyncMock.mockImplementation((path: string) => files.delete(path));
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        yield* Layer.build(
+          DesktopPreReadyPlatform.layer.pipe(
+            Layer.provide(Layer.succeed(HostProcess.Platform, "linux")),
+            Layer.provide(
+              DesktopConfig.layerTest({
+                XDG_DATA_HOME: "/xdg",
+                XDG_DATA_DIRS: dataDirs,
+                T3CODE_DESKTOP_LAUNCHER_PATH: "/nix/profile/bin/t3code-desktop",
+              }),
+            ),
+          ),
+        );
+        assert.equal(files.get(entryPath), kept ? entry : undefined);
+        assert.equal(
+          writeFileSyncMock.mock.calls.some(([path]) => path === entryPath),
+          rewritten,
+        );
+        assert.deepEqual(setDesktopNameMock.mock.calls, [["com.t3tools.T3Code.desktop"]]);
+      }),
+    ).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
+  });
+
+  it.effect("still writes the entry when $XDG_DATA_DIRS only lists $XDG_DATA_HOME", () => {
+    vi.stubEnv("VITE_DEV_SERVER_URL", "");
+    getSwitchValueMock.mockReturnValue("");
+    existsSyncMock.mockReturnValue(true);
+    readFileSyncMock.mockImplementation((path: string) =>
+      path.endsWith(".desktop") ? "NoDisplay=true\n" : "{}",
+    );
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        yield* Layer.build(
+          DesktopPreReadyPlatform.layer.pipe(
+            Layer.provide(Layer.succeed(HostProcess.Platform, "linux")),
+            Layer.provide(
+              DesktopConfig.layerTest({ XDG_DATA_HOME: "/xdg", XDG_DATA_DIRS: "/xdg" }),
+            ),
+          ),
+        );
+        assert.isTrue(
+          writeFileSyncMock.mock.calls.some(
+            ([path]) => path === "/xdg/applications/com.t3tools.T3Code.desktop",
+          ),
+        );
+        assert.deepEqual(rmSyncMock.mock.calls, []);
       }),
     ).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
   });
